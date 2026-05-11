@@ -385,7 +385,8 @@ function importCSVPacientes(event) {
     lines.forEach((line, i) => {
       const cols = line.split(',').map(c => c.replace(/^"|"$/g, '').trim());
       const nombre = cols[1];
-      const tarifa = parseInt((cols[2] || '').replace(/[^0-9]/g, ''));
+      const tarifaRaw = (cols[2] || '').replace(/\$|\s/g, '').trim();
+      const tarifa = Math.round(parseFloat(tarifaRaw.replace(/,/g, '')));
       if (!nombre || nombre.toLowerCase() === 'nombre') return;
       if (!tarifa) { errores.push('Fila ' + (i+1) + ': tarifa inválida — ' + (nombre || 'sin nombre')); return; }
       preview.push({ nombre, tarifa });
