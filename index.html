@@ -155,7 +155,17 @@
   <!-- PACIENTES -->
   <div id="s-pacientes" class="section">
     <div class="card">
-      <div class="card-title">Nuevo paciente</div>
+      <div class="card-title">Importar pacientes desde CSV</div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:10px;">Tu archivo debe tener columnas en este orden: <strong>Número · Nombre · Tarifa</strong>. La primera fila puede ser encabezado — la app la detecta automáticamente.</p>
+      <div class="actions-row" style="margin-top:0;">
+        <button class="btn primary" onclick="document.getElementById('csv-file').click()">⬆ Seleccionar archivo CSV</button>
+        <input type="file" id="csv-file" accept=".csv" style="display:none;" onchange="importCSVPacientes(event)" />
+      </div>
+      <div id="csv-preview" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Nuevo paciente manual</div>
       <div class="form-row">
         <div class="form-group"><label>Nombre completo *</label><input id="p-nombre" placeholder="Ej: María Torres" /></div>
         <div class="form-group"><label>Tarifa por sesión (COP) *</label><input id="p-tarifa" type="number" placeholder="180000" /></div>
@@ -164,7 +174,10 @@
         <div class="form-group"><label>Email</label><input id="p-email" type="email" placeholder="paciente@email.com" /></div>
         <div class="form-group"><label>Teléfono</label><input id="p-tel" placeholder="+57 300 000 0000" /></div>
       </div>
-      <div class="form-group" style="margin-bottom:12px;"><label>Notas clínicas breves</label><input id="p-notas" placeholder="Motivo de consulta, contexto..." /></div>
+      <div class="form-row">
+        <div class="form-group"><label>Fecha de cumpleaños</label><input id="p-cumple" type="date" /></div>
+        <div class="form-group"><label>Notas clínicas breves</label><input id="p-notas" placeholder="Motivo de consulta, contexto..." /></div>
+      </div>
       <button class="btn primary" onclick="addPaciente()">+ Agregar paciente</button>
     </div>
 
@@ -355,10 +368,61 @@ function addPaciente() {
   const tarifa = parseInt(document.getElementById('p-tarifa').value) || 0;
   if (!nombre) { alert('El nombre es obligatorio.'); return; }
   if (!tarifa) { alert('La tarifa es obligatoria.'); return; }
-  DB.pacientes.push({ id: Date.now(), nombre, tarifa, email: document.getElementById('p-email').value.trim(), tel: document.getElementById('p-tel').value.trim(), notas: document.getElementById('p-notas').value.trim(), creado: today() });
+  DB.pacientes.push({ id: Date.now(), nombre, tarifa, email: document.getElementById('p-email').value.trim(), tel: document.getElementById('p-tel').value.trim(), cumple: document.getElementById('p-cumple').value, notas: document.getElementById('p-notas').value.trim(), creado: today() });
   saveDB();
-  ['p-nombre','p-tarifa','p-email','p-tel','p-notas'].forEach(id => document.getElementById(id).value = '');
+  ['p-nombre','p-tarifa','p-email','p-tel','p-cumple','p-notas'].forEach(id => document.getElementById(id).value = '');
   renderPacientes(); populateSelects();
+}
+
+function importCSVPacientes(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const lines = e.target.result.split('\n').map(l => l.trim()).filter(l => l);
+    const preview = [];
+    const errores = [];
+    lines.forEach((line, i) => {
+      const cols = line.split(',').map(c => c.replace(/^"|"$/g, '').trim());
+      const nombre = cols[1];
+      const tarifa = parseInt((cols[2] || '').replace(/[^0-9]/g, ''));
+      if (!nombre || nombre.toLowerCase() === 'nombre') return;
+      if (!tarifa) { errores.push('Fila ' + (i+1) + ': tarifa inválida — ' + (nombre || 'sin nombre')); return; }
+      preview.push({ nombre, tarifa });
+    });
+    const el = document.getElementById('csv-preview');
+    if (!preview.length) {
+      el.innerHTML = '<div class="alert warning">No se encontraron pacientes válidos. Verifica que el archivo tenga columnas: Número, Nombre, Tarifa.</div>';
+      return;
+    }
+    el.innerHTML = `
+      <div class="alert info">Se detectaron <strong>${preview.length}</strong> pacientes. Revisa y confirma la importación.</div>
+      <table style="margin-bottom:12px;"><thead><tr><th>Nombre</th><th>Tarifa</th></tr></thead><tbody>
+        ${preview.map(p => `<tr><td>${p.nombre}</td><td>${fmt(p.tarifa)}</td></tr>`).join('')}
+      </tbody></table>
+      ${errores.length ? '<div class="alert warning">Filas con errores (no se importarán): ' + errores.join(' · ') + '</div>' : ''}
+      <button class="btn primary" onclick="confirmImportCSV()">Importar ${preview.length} pacientes</button>
+    `;
+    window._csvPreview = preview;
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function confirmImportCSV() {
+  const preview = window._csvPreview || [];
+  let importados = 0;
+  let duplicados = 0;
+  preview.forEach(p => {
+    const existe = DB.pacientes.find(x => x.nombre.toLowerCase() === p.nombre.toLowerCase());
+    if (existe) { duplicados++; return; }
+    DB.pacientes.push({ id: Date.now() + Math.random(), nombre: p.nombre, tarifa: p.tarifa, email: '', tel: '', cumple: '', notas: '', creado: today() });
+    importados++;
+  });
+  saveDB();
+  document.getElementById('csv-preview').innerHTML = `<div class="alert success">✓ ${importados} pacientes importados correctamente.${duplicados ? ' ' + duplicados + ' duplicados omitidos.' : ''}</div>`;
+  renderPacientes(); populateSelects();
+  window._csvPreview = [];
 }
 
 function renderPacientes() {
@@ -368,8 +432,9 @@ function renderPacientes() {
     DB.pacientes.map(p => {
       const ses = DB.sesiones.filter(s => s.pacienteId === p.id);
       const deuda = ses.filter(s => s.estado !== 'pagada').reduce((a,s) => a + s.tarifa, 0);
+      const cumpleStr = p.cumple ? '<br><span style="font-size:11px;color:var(--text3)">🎂 ' + p.cumple.substring(5).replace('-','/') + '</span>' : '';
       return `<tr>
-        <td><strong style="font-weight:500">${p.nombre}</strong>${p.notas ? '<br><span style="font-size:11px;color:var(--text3)">' + p.notas + '</span>' : ''}${p.email ? '<br><span style="font-size:11px;color:var(--text3)">' + p.email + '</span>' : ''}</td>
+        <td><strong style="font-weight:500">${p.nombre}</strong>${p.notas ? '<br><span style="font-size:11px;color:var(--text3)">' + p.notas + '</span>' : ''}${p.email ? '<br><span style="font-size:11px;color:var(--text3)">' + p.email + '</span>' : ''}${cumpleStr}</td>
         <td>${fmt(p.tarifa)}</td>
         <td>${ses.length}</td>
         <td>${deuda > 0 ? '<span class="badge deuda">' + fmt(deuda) + '</span>' : '<span class="badge pagada">Al día</span>'}</td>
