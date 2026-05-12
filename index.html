@@ -712,15 +712,15 @@ async function fetchCalendarEvents() {
   const el = document.getElementById('gcal-events');
   el.innerHTML = '<div style="font-size:13px;color:var(--text2);">Cargando citas...</div>';
   try {
-    const now = new Date();
+    const start = new Date('2026-05-01T00:00:00');
     const end = new Date(); end.setDate(end.getDate() + 30);
     const resp = await gapi.client.calendar.events.list({
       calendarId: 'primary',
-      timeMin: now.toISOString(),
+      timeMin: start.toISOString(),
       timeMax: end.toISOString(),
       singleEvents: true,
       orderBy: 'startTime',
-      maxResults: 50
+      maxResults: 200
     });
     const events = resp.result.items || [];
     if (!events.length) { el.innerHTML = '<div class="empty">Sin citas en los próximos 30 días.</div>'; return; }
