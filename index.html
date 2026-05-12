@@ -728,7 +728,7 @@ async function fetchCalendarEvents() {
       events.map(ev => {
         const fecha = ev.start.date || ev.start.dateTime?.split('T')[0];
         const titulo = ev.summary || 'Sin título';
-        const pacMatch = DB.pacientes.find(p => titulo.toLowerCase().includes(p.nombre.split(' ')[0].toLowerCase()));
+        const norm = s => s.toLowerCase().normalize("NFD").replace(/[0300-036f]/g,""); const tituloN = norm(titulo); const pacMatch = DB.pacientes.find(p => { const partes = norm(p.nombre).split(' ').filter(x => x.length > 2); return partes.length >= 2 ? partes.every(w => tituloN.includes(w)) : tituloN.includes(norm(p.nombre)); });
         return `<tr>
           <td>${fecha}</td>
           <td>${titulo}</td>
