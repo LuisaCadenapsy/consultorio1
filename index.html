@@ -431,7 +431,7 @@ function importCSVPacientes(event) {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async (e) => {
     const lines = e.target.result.split('\n').map(l => l.trim()).filter(l => l);
     const preview = [];
     const errores = [];
@@ -720,7 +720,7 @@ function importBackup(event) {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async (e) => {
     try {
       const data = JSON.parse(e.target.result);
       if (!data.pacientes || !data.sesiones) throw new Error('Formato inválido');
@@ -869,10 +869,10 @@ document.getElementById('export-year').value = now.getFullYear();
 document.getElementById('export-month').onchange = previewExport;
 document.getElementById('export-year').onchange = previewExport;
 document.getElementById('fb-status').textContent = 'Conectando a la nube...';
-initFirebase().catch(e => {
-  document.getElementById('fb-status').textContent = 'Error de conexión — verifica internet';
+initFirebase().catch(err => {
+  document.getElementById('fb-status').textContent = 'Error de conexión';
   document.getElementById('fb-status').style.color = 'var(--danger-text)';
-  console.error(e);
+  console.error('Firebase error:', err);
 });
 </script>
 
