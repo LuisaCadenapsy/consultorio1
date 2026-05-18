@@ -105,6 +105,7 @@
 <header class="app-header">
   <div>
     <div class="app-header h1" style="font-size:15px;font-weight:500;">Consultorio</div>
+  <span id="fb-status" style="font-size:11px;color:var(--text3);margin-left:8px;"></span>
     <div style="font-size:11px;color:var(--text3);" id="header-sub">Gestión de pacientes · sesiones · cobros</div>
   </div>
   <nav class="nav">
@@ -338,16 +339,67 @@ const GCAL_SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const MESES_SHORT = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
-let DB = loadDB();
+// ---- FIREBASE CONFIG ----
+const firebaseConfig = {
+  apiKey: "AIzaSyCNiEWIC2USiBDT_WQALbfJFKiCnNLP_II",
+  authDomain: "consultorio-1e99a.firebaseapp.com",
+  projectId: "consultorio-1e99a",
+  storageBucket: "consultorio-1e99a.firebasestorage.app",
+  messagingSenderId: "908977581640",
+  appId: "1:908977581640:web:6380f1a60d798a336c327d"
+};
+
+let firebaseApp, db, pacientesRef, sesionesRef;
+let DB = { pacientes: [], sesiones: [] };
 let tokenClient = null;
 let gapiInited = false;
 let gisInited = false;
 
-function loadDB() {
-  try { return JSON.parse(localStorage.getItem('psicoapp_v2') || '{"pacientes":[],"sesiones":[]}'); }
-  catch(e) { return {pacientes:[], sesiones:[]}; }
+async function initFirebase() {
+  const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
+  const { getFirestore, collection, getDocs, doc, setDoc, deleteDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  firebaseApp = initializeApp(firebaseConfig);
+  db = getFirestore(firebaseApp);
+  pacientesRef = collection(db, 'pacientes');
+  sesionesRef = collection(db, 'sesiones');
+  window._fb = { collection, getDocs, doc, setDoc, deleteDoc };
+  await loadFromFirebase();
+  renderPacientes();
+  populateSelects();
+  renderDashboard();
+  document.getElementById('fb-status').textContent = 'Conectado a la nube';
+  document.getElementById('fb-status').style.color = 'var(--success-text)';
 }
-function saveDB() { localStorage.setItem('psicoapp_v2', JSON.stringify(DB)); }
+
+async function loadFromFirebase() {
+  const { getDocs } = window._fb;
+  const [pSnap, sSnap] = await Promise.all([getDocs(pacientesRef), getDocs(sesionesRef)]);
+  DB.pacientes = pSnap.docs.map(d => ({ ...d.data(), id: d.id }));
+  DB.sesiones = sSnap.docs.map(d => ({ ...d.data(), id: d.id }));
+}
+
+async function savePaciente(p) {
+  const { doc, setDoc } = window._fb;
+  await setDoc(doc(db, 'pacientes', String(p.id)), p);
+}
+
+async function deletePacienteDB(id) {
+  const { doc, deleteDoc } = window._fb;
+  await deleteDoc(doc(db, 'pacientes', String(id)));
+}
+
+async function saveSesion(s) {
+  const { doc, setDoc } = window._fb;
+  await setDoc(doc(db, 'sesiones', String(s.id)), s);
+}
+
+async function deleteSesionDB(id) {
+  const { doc, deleteDoc } = window._fb;
+  await deleteDoc(doc(db, 'sesiones', String(id)));
+}
+
+function saveDB() { /* datos guardados en Firebase automáticamente */ }
+function loadDB() { return { pacientes: [], sesiones: [] }; }
 function fmt(n) { return new Intl.NumberFormat('es-CO', {style:'currency', currency:'COP', minimumFractionDigits:0}).format(n || 0); }
 function today() { return new Date().toISOString().split('T')[0]; }
 
@@ -363,13 +415,14 @@ function showSection(id, btn) {
 }
 
 /* ---- PACIENTES ---- */
-function addPaciente() {
+async function addPaciente() {
   const nombre = document.getElementById('p-nombre').value.trim();
   const tarifa = parseInt(document.getElementById('p-tarifa').value) || 0;
   if (!nombre) { alert('El nombre es obligatorio.'); return; }
   if (!tarifa) { alert('La tarifa es obligatoria.'); return; }
-  DB.pacientes.push({ id: Date.now(), nombre, tarifa, email: document.getElementById('p-email').value.trim(), tel: document.getElementById('p-tel').value.trim(), cumple: document.getElementById('p-cumple').value, notas: document.getElementById('p-notas').value.trim(), creado: today() });
-  saveDB();
+  const np = { id: String(Date.now()), nombre, tarifa, email: document.getElementById('p-email').value.trim(), tel: document.getElementById('p-tel').value.trim(), cumple: document.getElementById('p-cumple').value, notas: document.getElementById('p-notas').value.trim(), creado: today() };
+  DB.pacientes.push(np);
+  await savePaciente(np);
   ['p-nombre','p-tarifa','p-email','p-tel','p-cumple','p-notas'].forEach(id => document.getElementById(id).value = '');
   renderPacientes(); populateSelects();
 }
@@ -410,17 +463,20 @@ function importCSVPacientes(event) {
   event.target.value = '';
 }
 
-function confirmImportCSV() {
+async function confirmImportCSV() {
   const preview = window._csvPreview || [];
   let importados = 0;
   let duplicados = 0;
+  const promises = [];
   preview.forEach(p => {
     const existe = DB.pacientes.find(x => x.nombre.toLowerCase() === p.nombre.toLowerCase());
     if (existe) { duplicados++; return; }
-    DB.pacientes.push({ id: Date.now() + Math.random(), nombre: p.nombre, tarifa: p.tarifa, email: '', tel: '', cumple: '', notas: '', creado: today() });
+    const np = { id: String(Date.now() + Math.random()), nombre: p.nombre, tarifa: p.tarifa, email: '', tel: '', cumple: '', notas: '', creado: today() };
+    DB.pacientes.push(np);
+    promises.push(savePaciente(np));
     importados++;
   });
-  saveDB();
+  await Promise.all(promises);
   document.getElementById('csv-preview').innerHTML = `<div class="alert success">✓ ${importados} pacientes importados correctamente.${duplicados ? ' ' + duplicados + ' duplicados omitidos.' : ''}</div>`;
   renderPacientes(); populateSelects();
   window._csvPreview = [];
@@ -447,19 +503,22 @@ function renderPacientes() {
     }).join('') + '</tbody></table>';
 }
 
-function editTarifa(id) {
+async function editTarifa(id) {
   const p = DB.pacientes.find(p => p.id === id);
   if (!p) return;
   const nueva = prompt(`Tarifa actual de ${p.nombre}: ${fmt(p.tarifa)}\nIngresa la nueva tarifa:`, p.tarifa);
-  if (nueva && !isNaN(parseInt(nueva))) { p.tarifa = parseInt(nueva); saveDB(); renderPacientes(); }
+  if (nueva && !isNaN(parseInt(nueva))) { p.tarifa = parseInt(nueva); await savePaciente(p); renderPacientes(); }
 }
 
-function deletePaciente(id) {
-  const p = DB.pacientes.find(p => p.id === id);
+async function deletePaciente(id) {
+  const p = DB.pacientes.find(p => p.id == id);
   if (!confirm(`¿Eliminar a ${p?.nombre} y todas sus sesiones? Esta acción no se puede deshacer.`)) return;
-  DB.pacientes = DB.pacientes.filter(p => p.id !== id);
-  DB.sesiones = DB.sesiones.filter(s => s.pacienteId !== id);
-  saveDB(); renderPacientes(); populateSelects();
+  const sesAEliminar = DB.sesiones.filter(s => s.pacienteId == id);
+  DB.pacientes = DB.pacientes.filter(p => p.id != id);
+  DB.sesiones = DB.sesiones.filter(s => s.pacienteId != id);
+  await deletePacienteDB(id);
+  await Promise.all(sesAEliminar.map(s => deleteSesionDB(s.id)));
+  renderPacientes(); populateSelects();
 }
 
 /* ---- SESIONES ---- */
@@ -482,7 +541,7 @@ function populateSelects() {
   document.getElementById('s-fecha').value = today();
 }
 
-function addSesion() {
+async function addSesion() {
   const pid = document.getElementById('s-paciente').value;
   const fecha = document.getElementById('s-fecha').value;
   const tarifa = parseInt(document.getElementById('s-tarifa').value) || 0;
@@ -490,8 +549,9 @@ function addSesion() {
   if (!pid) { alert('Selecciona un paciente.'); return; }
   if (!fecha) { alert('La fecha es obligatoria.'); return; }
   if (!tarifa) { alert('Ingresa la tarifa de la sesión.'); return; }
-  DB.sesiones.push({ id: Date.now(), pacienteId: parseInt(pid), fecha, tarifa, estado, notas: document.getElementById('s-notas').value.trim() });
-  saveDB();
+  const ns = { id: String(Date.now()), pacienteId: pid, fecha, tarifa, estado, notas: document.getElementById('s-notas').value.trim() };
+  DB.sesiones.push(ns);
+  await saveSesion(ns);
   document.getElementById('s-notas').value = '';
   document.getElementById('s-estado').value = 'pagada';
   renderSesiones();
@@ -524,18 +584,20 @@ function renderSesiones() {
     }).join('') + '</tbody></table>';
 }
 
-function toggleEstado(id) {
-  const s = DB.sesiones.find(s => s.id === id);
+async function toggleEstado(id) {
+  const s = DB.sesiones.find(s => s.id == id);
   if (!s) return;
   const estados = ['pagada', 'pendiente', 'deuda'];
   s.estado = estados[(estados.indexOf(s.estado) + 1) % 3];
-  saveDB(); renderSesiones();
+  await saveSesion(s);
+  renderSesiones();
 }
 
-function deleteSesion(id) {
+async function deleteSesion(id) {
   if (!confirm('¿Eliminar esta sesión?')) return;
-  DB.sesiones = DB.sesiones.filter(s => s.id !== id);
-  saveDB(); renderSesiones();
+  DB.sesiones = DB.sesiones.filter(s => s.id != id);
+  await deleteSesionDB(id);
+  renderSesiones();
 }
 
 /* ---- DASHBOARD ---- */
@@ -610,9 +672,11 @@ function renderCobros() {
     }).join('') + '</tbody></table>';
 }
 
-function markAllPaid(pid) {
-  DB.sesiones.filter(s => s.pacienteId === pid && s.estado !== 'pagada').forEach(s => s.estado = 'pagada');
-  saveDB(); renderCobros();
+async function markAllPaid(pid) {
+  const toUpdate = DB.sesiones.filter(s => s.pacienteId == pid && s.estado !== 'pagada');
+  toUpdate.forEach(s => s.estado = 'pagada');
+  await Promise.all(toUpdate.map(s => saveSesion(s)));
+  renderCobros();
 }
 
 function previewExport() {
@@ -661,7 +725,11 @@ function importBackup(event) {
       const data = JSON.parse(e.target.result);
       if (!data.pacientes || !data.sesiones) throw new Error('Formato inválido');
       if (confirm(`¿Importar ${data.pacientes.length} pacientes y ${data.sesiones.length} sesiones? Esto reemplazará los datos actuales.`)) {
-        DB = data; saveDB(); renderPacientes(); populateSelects(); renderDashboard();
+        const allP = [...DB.pacientes]; const allS = [...DB.sesiones];
+        DB = data;
+        await Promise.all([...allP.map(p => deletePacienteDB(p.id)), ...allS.map(s => deleteSesionDB(s.id))]);
+        await Promise.all([...DB.pacientes.map(p => savePaciente(p)), ...DB.sesiones.map(s => saveSesion(s))]);
+        renderPacientes(); populateSelects(); renderDashboard();
         alert('Datos importados correctamente.');
       }
     } catch(e) { alert('El archivo no es un respaldo válido.'); }
@@ -670,10 +738,13 @@ function importBackup(event) {
   event.target.value = '';
 }
 
-function clearData() {
+async function clearData() {
   if (!confirm('¿Borrar TODOS los datos? Esta acción no se puede deshacer. Considera hacer un respaldo primero.')) return;
   if (!confirm('Confirmación final: ¿borrar todos los pacientes y sesiones?')) return;
-  DB = {pacientes:[], sesiones:[]}; saveDB();
+  const allP = [...DB.pacientes];
+  const allS = [...DB.sesiones];
+  DB = {pacientes:[], sesiones:[]};
+  await Promise.all([...allP.map(p => deletePacienteDB(p.id)), ...allS.map(s => deleteSesionDB(s.id))]);
   renderPacientes(); populateSelects(); renderDashboard(); renderCobros();
   alert('Datos eliminados.');
 }
@@ -739,13 +810,14 @@ async function fetchCalendarEvents() {
   } catch(e) { el.innerHTML = '<div class="alert warning">Error al cargar citas: ' + (e.message || e) + '</div>'; }
 }
 
-function importEvent(fecha, pacienteId) {
+async function importEvent(fecha, pacienteId) {
   const p = DB.pacientes.find(p => p.id == pacienteId);
   if (!p) return;
-  const existe = DB.sesiones.find(s => s.pacienteId === p.id && s.fecha === fecha);
+  const existe = DB.sesiones.find(s => s.pacienteId == p.id && s.fecha === fecha);
   if (existe) { alert('Ya existe una sesión de ' + p.nombre + ' en esa fecha.'); return; }
-  DB.sesiones.push({ id: Date.now(), pacienteId: p.id, fecha, tarifa: p.tarifa, estado: 'pendiente', notas: 'Importada de Google Calendar' });
-  saveDB();
+  const ns = { id: String(Date.now()), pacienteId: p.id, fecha, tarifa: p.tarifa, estado: 'pendiente', notas: 'Importada de Google Calendar' };
+  DB.sesiones.push(ns);
+  await saveSesion(ns);
   alert('Sesión importada: ' + p.nombre + ' · ' + fecha);
   fetchCalendarEvents();
 }
@@ -774,13 +846,14 @@ function parseManualEvents() {
   window._parsedCount = results.length;
 }
 
-function importManual(i) {
+async function importManual(i) {
   const pid = document.getElementById('cp-pac-' + i).value;
   const fecha = document.getElementById('cp-date-' + i).value;
   const p = DB.pacientes.find(p => p.id == pid);
   if (!p || !fecha) { alert('Selecciona paciente y fecha.'); return; }
-  DB.sesiones.push({ id: Date.now(), pacienteId: p.id, fecha, tarifa: p.tarifa, estado: 'pendiente', notas: 'Importada manualmente' });
-  saveDB();
+  const ns2 = { id: String(Date.now()), pacienteId: p.id, fecha, tarifa: p.tarifa, estado: 'pendiente', notas: 'Importada manualmente' };
+  DB.sesiones.push(ns2);
+  await saveSesion(ns2);
   const row = document.getElementById('cp-pac-' + i).closest('tr');
   row.style.opacity = '0.4';
   row.querySelector('button').textContent = '✓';
@@ -793,13 +866,14 @@ document.getElementById('dash-month').value = now.getMonth();
 document.getElementById('dash-year').value = now.getFullYear();
 document.getElementById('export-month').value = now.getMonth();
 document.getElementById('export-year').value = now.getFullYear();
-
 document.getElementById('export-month').onchange = previewExport;
 document.getElementById('export-year').onchange = previewExport;
-
-renderPacientes();
-populateSelects();
-renderDashboard();
+document.getElementById('fb-status').textContent = 'Conectando a la nube...';
+initFirebase().catch(e => {
+  document.getElementById('fb-status').textContent = 'Error de conexión — verifica internet';
+  document.getElementById('fb-status').style.color = 'var(--danger-text)';
+  console.error(e);
+});
 </script>
 
 <!-- Google APIs — cargan solo en dominio publicado -->
