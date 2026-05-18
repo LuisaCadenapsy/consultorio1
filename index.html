@@ -759,6 +759,13 @@ function gapiLoaded() {
 
 function gisLoaded() { gisInited = true; }
 
+function reconectarGCal() {
+  const saved = localStorage.getItem('gcal-client-id');
+  if (!saved) { alert('Primero conecta una vez con tu Client ID.'); return; }
+  document.getElementById('gcal-client-id').value = saved;
+  initGCal();
+}
+
 function initGCal() {
   const clientId = document.getElementById('gcal-client-id').value.trim();
   if (!clientId) { alert('Ingresa tu Client ID de Google.'); return; }
@@ -868,6 +875,11 @@ document.getElementById('export-month').value = now.getMonth();
 document.getElementById('export-year').value = now.getFullYear();
 document.getElementById('export-month').onchange = previewExport;
 document.getElementById('export-year').onchange = previewExport;
+// Auto-fill saved Client ID
+const savedClientId = localStorage.getItem('gcal-client-id');
+if (savedClientId) {
+  document.getElementById('gcal-client-id').value = savedClientId;
+}
 document.getElementById('fb-status').textContent = 'Conectando a la nube...';
 initFirebase().catch(err => {
   document.getElementById('fb-status').textContent = 'Error de conexión';
