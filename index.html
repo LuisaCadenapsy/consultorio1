@@ -777,44 +777,107 @@ function initGCal() {
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: clientId,
     scope: GCAL_SCOPES,
-    callback: (resp) => {
+    callback: async (resp) => {
       if (resp.error) { document.getElementById('gcal-status').innerHTML = '<div class="alert warning">Error al autenticar: ' + resp.error + '</div>'; return; }
-      document.getElementById('gcal-status').innerHTML = '<div class="alert success">✓ Conectado con Google Calendar.</div>';
+      document.getElementById('gcal-status').innerHTML = '<div class="alert success">✓ Conectado. Sincronizando citas automáticamente...</div>';
       document.getElementById('gcal-import-btn').disabled = false;
+      await autoSyncCalendar();
     }
   });
   tokenClient.requestAccessToken({ prompt: 'consent' });
 }
 
-async function fetchCalendarEvents() {
+function matchPaciente(titulo) {
+  const norm = s => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
+  const tituloN = norm(titulo);
+  return DB.pacientes.find(p => {
+    const partes = norm(p.nombre).split(' ').filter(x => x.length > 2);
+    return partes.length >= 2 ? partes.every(w => tituloN.includes(w)) : tituloN.includes(norm(p.nombre));
+  });
+}
+
+async function getCalendarEvents() {
+  const start = new Date('2026-05-01T00:00:00');
+  const end = new Date(); end.setDate(end.getDate() + 30);
+  const resp = await gapi.client.calendar.events.list({
+    calendarId: 'primary',
+    timeMin: start.toISOString(),
+    timeMax: end.toISOString(),
+    singleEvents: true,
+    orderBy: 'startTime',
+    maxResults: 200
+  });
+  return resp.result.items || [];
+}
+
+async function autoSyncCalendar() {
   const el = document.getElementById('gcal-events');
-  el.innerHTML = '<div style="font-size:13px;color:var(--text2);">Cargando citas...</div>';
+  el.innerHTML = '<div style="font-size:13px;color:var(--text2);">Sincronizando citas...</div>';
   try {
-    const start = new Date('2026-05-01T00:00:00');
-    const end = new Date(); end.setDate(end.getDate() + 30);
-    const resp = await gapi.client.calendar.events.list({
-      calendarId: 'primary',
-      timeMin: start.toISOString(),
-      timeMax: end.toISOString(),
-      singleEvents: true,
-      orderBy: 'startTime',
-      maxResults: 200
-    });
-    const events = resp.result.items || [];
-    if (!events.length) { el.innerHTML = '<div class="empty">Sin citas en los próximos 30 días.</div>'; return; }
-    el.innerHTML = '<table><thead><tr><th>Fecha</th><th>Título</th><th>Paciente detectado</th><th></th></tr></thead><tbody>' +
-      events.map(ev => {
-        const fecha = ev.start.date || ev.start.dateTime?.split('T')[0];
-        const titulo = ev.summary || 'Sin título';
-        const norm = s => s.toLowerCase().normalize("NFD").replace(/[0300-036f]/g,""); const tituloN = norm(titulo); const pacMatch = DB.pacientes.find(p => { const partes = norm(p.nombre).split(' ').filter(x => x.length > 2); return partes.length >= 2 ? partes.every(w => tituloN.includes(w)) : tituloN.includes(norm(p.nombre)); });
-        return `<tr>
-          <td>${fecha}</td>
-          <td>${titulo}</td>
-          <td>${pacMatch ? pacMatch.nombre : '<em style="color:var(--text3)">No detectado</em>'}</td>
-          <td>${pacMatch ? `<button class="btn small primary" onclick="importEvent('${fecha}','${pacMatch.id}')">Importar</button>` : ''}</td>
-        </tr>`;
-      }).join('') + '</tbody></table>';
-  } catch(e) { el.innerHTML = '<div class="alert warning">Error al cargar citas: ' + (e.message || e) + '</div>'; }
+    const events = await getCalendarEvents();
+    let importadas = 0;
+    let omitidas = 0;
+    let noDetectadas = 0;
+    const noDetectadasList = [];
+    const promises = [];
+    for (const ev of events) {
+      const fecha = ev.start.date || ev.start.dateTime?.split('T')[0];
+      const titulo = ev.summary || '';
+      const p = matchPaciente(titulo);
+      if (!p) { noDetectadas++; noDetectadasList.push({fecha, titulo}); continue; }
+      const existe = DB.sesiones.find(s => s.pacienteId == p.id && s.fecha === fecha);
+      if (existe) { omitidas++; continue; }
+      const ns = { id: String(Date.now() + Math.random()), pacienteId: p.id, fecha, tarifa: p.tarifa, estado: 'pendiente', notas: 'Sincronizada de Google Calendar' };
+      DB.sesiones.push(ns);
+      promises.push(saveSesion(ns));
+      importadas++;
+    }
+    await Promise.all(promises);
+    
+    let html = '';
+    if (importadas > 0) html += `<div class="alert success">✓ ${importadas} cita(s) nueva(s) importada(s) automáticamente.</div>`;
+    if (omitidas > 0) html += `<div class="alert info">${omitidas} cita(s) ya existían — no se duplicaron.</div>`;
+    
+    if (noDetectadasList.length > 0) {
+      html += `<div class="card" style="margin-top:12px;">
+        <div class="card-title">Citas no reconocidas (${noDetectadas})</div>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:10px;">Estas citas no coinciden con ningún paciente de tu lista. Puedes importarlas manualmente.</p>
+        <table><thead><tr><th>Fecha</th><th>Título en Calendar</th><th></th></tr></thead><tbody>` +
+        noDetectadasList.map(ev => `<tr>
+          <td>${ev.fecha}</td>
+          <td>${ev.titulo}</td>
+          <td><select id="sel-${ev.fecha.replace(/-/g,'')}-${btoa(ev.titulo).substring(0,8)}" style="font-size:12px;padding:4px;">
+            <option value="">— asignar paciente —</option>
+            ${DB.pacientes.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('')}
+          </select>
+          <button class="btn small primary" onclick="importManualEvent('${ev.fecha}', 'sel-${ev.fecha.replace(/-/g,'')}-${btoa(ev.titulo).substring(0,8)}')">Importar</button></td>
+        </tr>`).join('') +
+        '</tbody></table></div>';
+    }
+    
+    if (importadas === 0 && noDetectadasList.length === 0) {
+      html = '<div class="alert info">Todo al día — no hay citas nuevas para importar.</div>';
+    }
+    
+    el.innerHTML = html;
+    if (importadas > 0) { renderDashboard(); }
+  } catch(e) { el.innerHTML = '<div class="alert warning">Error al sincronizar: ' + (e.message || e) + '</div>'; }
+}
+
+async function importManualEvent(fecha, selId) {
+  const pid = document.getElementById(selId)?.value;
+  const p = DB.pacientes.find(p => p.id == pid);
+  if (!p) { alert('Selecciona un paciente.'); return; }
+  const existe = DB.sesiones.find(s => s.pacienteId == p.id && s.fecha === fecha);
+  if (existe) { alert('Ya existe una sesión de ' + p.nombre + ' en esa fecha.'); return; }
+  const ns = { id: String(Date.now()), pacienteId: p.id, fecha, tarifa: p.tarifa, estado: 'pendiente', notas: 'Importada manualmente' };
+  DB.sesiones.push(ns);
+  await saveSesion(ns);
+  await autoSyncCalendar();
+}
+
+async function fetchCalendarEvents() {
+  await autoSyncCalendar();
 }
 
 async function importEvent(fecha, pacienteId) {
@@ -825,8 +888,7 @@ async function importEvent(fecha, pacienteId) {
   const ns = { id: String(Date.now()), pacienteId: p.id, fecha, tarifa: p.tarifa, estado: 'pendiente', notas: 'Importada de Google Calendar' };
   DB.sesiones.push(ns);
   await saveSesion(ns);
-  alert('Sesión importada: ' + p.nombre + ' · ' + fecha);
-  fetchCalendarEvents();
+  await autoSyncCalendar();
 }
 
 function parseManualEvents() {
