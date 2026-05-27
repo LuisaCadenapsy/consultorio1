@@ -798,27 +798,11 @@ function matchPaciente(titulo) {
 
 async function getCalendarEvents() {
   const today = new Date();
-  const isMayo = today.getMonth() === 4 && today.getFullYear() === 2026;
-  
-  let start, end;
-  if (isMayo) {
-    // Mayo completo
-    start = new Date('2026-05-01T00:00:00');
-    end = new Date('2026-05-31T23:59:59');
-  } else {
-    // Semana en curso: lunes a domingo
-    const dayOfWeek = today.getDay(); // 0=domingo, 1=lunes...
-    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    start = new Date(today);
-    start.setDate(today.getDate() + diffToMonday);
-    start.setHours(0,0,0,0);
-    end = new Date(start);
-    end.setDate(start.getDate() + 6);
-    end.setHours(23,59,59,999);
-    // También incluir mayo completo para historial
-    const mayoStart = new Date('2026-05-01T00:00:00');
-    if (start > mayoStart) start = mayoStart;
-  }
+  today.setHours(23,59,59,999); // hasta el final de hoy
+
+  // Siempre desde el 1 de mayo 2026 hasta hoy (nunca futuro)
+  const start = new Date('2026-05-01T00:00:00');
+  const end = today;
 
   const resp = await gapi.client.calendar.events.list({
     calendarId: 'primary',
