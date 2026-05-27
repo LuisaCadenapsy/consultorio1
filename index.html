@@ -797,17 +797,20 @@ function matchPaciente(titulo) {
 }
 
 async function getCalendarEvents() {
-  const start = new Date('2026-05-01T00:00:00');
-  const end = new Date(); end.setDate(end.getDate() + 30);
+  const start = new Date();
+  start.setDate(1); start.setMonth(4); start.setFullYear(2026); // desde 1 mayo 2026
+  const end = new Date(); end.setMonth(end.getMonth() + 3); // 3 meses adelante
   const resp = await gapi.client.calendar.events.list({
     calendarId: 'primary',
     timeMin: start.toISOString(),
     timeMax: end.toISOString(),
     singleEvents: true,
     orderBy: 'startTime',
-    maxResults: 200
+    maxResults: 500
   });
-  return resp.result.items || [];
+  const all = resp.result.items || [];
+  // Solo citas con "Default color" — en la API no tienen colorId asignado
+  return all.filter(ev => !ev.colorId);
 }
 
 async function autoSyncCalendar() {
