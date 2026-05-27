@@ -828,7 +828,7 @@ async function autoSyncCalendar() {
     const noDetectadasList = [];
     const promises = [];
     for (const ev of events) {
-      const fecha = ev.start.date || ev.start.dateTime?.split('T')[0];
+      const fecha = ev.start.date || (ev.start.dateTime ? new Date(ev.start.dateTime).toLocaleDateString('en-CA') : null);
       const titulo = ev.summary || '';
       const p = matchPaciente(titulo);
       if (!p) { noDetectadas++; noDetectadasList.push({fecha, titulo}); continue; }
