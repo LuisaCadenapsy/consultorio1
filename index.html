@@ -836,9 +836,9 @@ async function autoSyncCalendar() {
       const titulo = ev.summary || '';
       const p = matchPaciente(titulo);
       if (!p) { noDetectadas++; noDetectadasList.push({fecha, titulo}); continue; }
-      const existe = DB.sesiones.find(s => s.pacienteId == p.id && s.fecha === fecha);
+      const existe = DB.sesiones.find(s => String(s.pacienteId) === String(p.id) && String(s.fecha) === String(fecha));
       if (existe) { omitidas++; continue; }
-      const ns = { id: String(Date.now() + Math.random()), pacienteId: p.id, fecha, tarifa: p.tarifa, estado: 'pendiente', notas: 'Sincronizada de Google Calendar' };
+      const ns = { id: String(Date.now() + Math.random()), pacienteId: String(p.id), fecha: String(fecha), tarifa: p.tarifa, estado: 'pendiente', notas: 'Sincronizada de Google Calendar' };
       DB.sesiones.push(ns);
       promises.push(saveSesion(ns));
       importadas++;
