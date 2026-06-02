@@ -565,7 +565,7 @@ function renderSesiones() {
   let ses = [...DB.sesiones].sort((a,b) => b.fecha.localeCompare(a.fecha));
   if (filtP) ses = ses.filter(s => s.pacienteId == filtP);
   if (filtE) ses = ses.filter(s => s.estado === filtE);
-  if (filtM !== '' && filtM !== null && filtM !== undefined) ses = ses.filter(s => new Date(s.fecha).getMonth() == filtM);
+  if (filtM !== '' && filtM !== null && filtM !== undefined) ses = ses.filter(s => { const p = s.fecha.split('-'); return parseInt(p[1])-1 == filtM; });
   if (!ses.length) { el.innerHTML = '<div class="empty" style="margin-top:1rem;">No hay sesiones con esos filtros.</div>'; return; }
   el.innerHTML = '<table style="margin-top:1rem;"><thead><tr><th>Fecha</th><th>Paciente</th><th>Tarifa</th><th>Estado</th><th>Notas</th><th></th></tr></thead><tbody>' +
     ses.map(s => {
@@ -602,7 +602,11 @@ async function deleteSesion(id) {
 
 /* ---- DASHBOARD ---- */
 function getMonthSes(month, year) {
-  return DB.sesiones.filter(s => { const d = new Date(s.fecha); return d.getMonth() === month && d.getFullYear() === year; });
+  return DB.sesiones.filter(s => {
+    if (!s.fecha) return false;
+    const p = s.fecha.split('-');
+    return parseInt(p[1])-1 === month && parseInt(p[0]) === year;
+  });
 }
 
 function renderDashboard() {
