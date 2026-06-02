@@ -815,8 +815,10 @@ async function getCalendarEvents() {
     maxResults: 500
   });
   const all = resp.result.items || [];
-  // Solo citas con "Default color" — en la API no tienen colorId asignado
-  return all.filter(ev => !ev.colorId);
+  // Solo citas del calendario Luisa Cadena (verde/Sage)
+  // Las citas que usan el color del calendario no tienen colorId propio
+  // Las que tienen colorId diferente (amarillo, etc.) se excluyen
+  return all.filter(ev => !ev.colorId || ev.colorId === '2');
 }
 
 async function autoSyncCalendar() {
