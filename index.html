@@ -800,9 +800,11 @@ async function getCalendarEvents() {
   const today = new Date();
   today.setHours(23,59,59,999); // hasta el final de hoy
 
-  // Siempre desde el 1 de mayo 2026 hasta hoy (nunca futuro)
+  // Desde el 1 de mayo 2026 hasta hoy (nunca futuro)
   const start = new Date('2026-05-01T00:00:00');
   const end = today;
+  // Asegurarse que end nunca sea antes de start
+  if (end < start) end.setTime(start.getTime());
 
   const resp = await gapi.client.calendar.events.list({
     calendarId: 'primary',
