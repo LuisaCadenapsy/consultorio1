@@ -815,10 +815,10 @@ async function getCalendarEvents() {
     maxResults: 500
   });
   const all = resp.result.items || [];
-  // Solo citas del calendario Luisa Cadena (verde/Sage)
-  // Las citas que usan el color del calendario no tienen colorId propio
-  // Las que tienen colorId diferente (amarillo, etc.) se excluyen
-  return all.filter(ev => !ev.colorId || ev.colorId === '2');
+  // Excluir solo citas con colores específicos que no son pacientes
+  // Amarillo (5=Banana), Azul oscuro (9=Blueberry), Rojo (11=Tomato), Gris (8=Graphite)
+  const excluir = ['5', '9', '11', '8'];
+  return all.filter(ev => !excluir.includes(ev.colorId));
 }
 
 async function autoSyncCalendar() {
