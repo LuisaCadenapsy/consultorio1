@@ -244,6 +244,23 @@
     </div>
 
     <div class="card">
+      <div class="card-title">💬 Mensaje de cobro — WhatsApp</div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:1rem;">Genera un mensaje personalizado por paciente con el resumen del mes.</p>
+      <div class="filter-row" style="margin-bottom:12px;">
+        <select id="wa-mes">
+          <option value="0">Enero</option><option value="1">Febrero</option><option value="2">Marzo</option>
+          <option value="3">Abril</option><option value="4">Mayo</option><option value="5" selected>Junio</option>
+          <option value="6">Julio</option><option value="7">Agosto</option><option value="8">Septiembre</option>
+          <option value="9">Octubre</option><option value="10">Noviembre</option><option value="11">Diciembre</option>
+        </select>
+        <select id="wa-año"><option value="2025">2025</option><option value="2026" selected>2026</option></select>
+        <select id="wa-paciente" style="min-width:180px;"><option value="">— Seleccionar paciente —</option></select>
+        <button class="btn primary" onclick="generarMensajeWA()">Generar mensaje</button>
+      </div>
+      <div id="wa-resultado" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card">
       <div class="card-title">Exportar informe mensual</div>
       <p style="font-size:13px;color:var(--text2);margin-bottom:1rem;">Genera un CSV con el detalle del mes. Compatible con Excel, Google Sheets y cualquier software contable.</p>
       <div class="filter-row" style="margin-bottom:12px;">
@@ -657,6 +674,12 @@ function renderDashboard() {
 
 /* ---- COBROS ---- */
 function renderCobros() {
+  // Populate WhatsApp patient select
+  const wasel = document.getElementById('wa-paciente');
+  if (wasel) {
+    wasel.innerHTML = '<option value="">— Seleccionar paciente —</option>' +
+      DB.pacientes.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+  }
   const el = document.getElementById('cobros-content');
   const deudores = DB.pacientes.map(p => {
     const ses = DB.sesiones.filter(s => s.pacienteId === p.id && s.estado !== 'pagada');
@@ -692,6 +715,80 @@ function previewExport() {
   document.getElementById('export-preview').innerHTML = ses.length
     ? `<div class="alert info">${MESES[m]} ${y}: <strong>${ses.length}</strong> sesiones · cobrado <strong>${fmt(cobrado)}</strong> · por cobrar <strong>${fmt(pendiente)}</strong></div>`
     : `<div class="alert warning">Sin sesiones registradas en ${MESES[m]} ${y}.</div>`;
+}
+
+const MESES_FULL = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+function generarMensajeWA() {
+  const mes = parseInt(document.getElementById('wa-mes').value);
+  const año = parseInt(document.getElementById('wa-año').value);
+  const pid = document.getElementById('wa-paciente').value;
+  const el = document.getElementById('wa-resultado');
+
+  if (!pid) { el.innerHTML = '<div class="alert warning">Selecciona un paciente.</div>'; return; }
+
+  const p = DB.pacientes.find(p => p.id == pid);
+  if (!p) return;
+
+  const ses = DB.sesiones.filter(s => {
+    const parts = (s.fecha || '').split('-');
+    return s.pacienteId == pid && parseInt(parts[1])-1 === mes && parseInt(parts[0]) === año;
+  });
+
+  const pagadas = ses.filter(s => s.estado === 'pagada');
+  const pendientes = ses.filter(s => s.estado !== 'pagada');
+  const totalPend = pendientes.reduce((a,s) => a + s.tarifa, 0);
+  const totalPag = pagadas.reduce((a,s) => a + s.tarifa, 0);
+  const fmt = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n);
+
+  const nombre = p.nombre.split(' ')[0];
+
+  let msg = '';
+  if (pendientes.length === 0) {
+    msg = `Hola ${nombre} 🌿
+
+Quiero agradecerte por tu constancia este mes. Es un privilegio acompañarte en este proceso.
+
+Tu resumen de ${MESES_FULL[mes]}:
+• ${pagadas.length} sesión(es) — ${fmt(totalPag)} ✓ pagado
+
+¡Todo al día! Cuando sientas que es buen momento para ti, seguimos. No hay afán. 🤍
+
+Luisa`;
+  } else {
+    msg = `Hola ${nombre} 🌿
+
+Quiero agradecerte por tu presencia y tu confianza este mes. Es un honor acompañarte.
+
+Tu resumen de ${MESES_FULL[mes]}:
+• ${ses.length} sesión(es) en total`;
+    if (pagadas.length > 0) msg += `
+• ${fmt(totalPag)} ya pagado ✓`;
+    msg += `
+• Saldo pendiente: ${fmt(totalPend)}`;
+    msg += `
+
+Cuando esté bien para ti, me avisas. No hay afán. 🤍
+
+Luisa`;
+  }
+
+  el.innerHTML = `
+    <div style="background:var(--bg2);border-radius:var(--radius);padding:1rem;margin-bottom:12px;white-space:pre-wrap;font-size:13px;line-height:1.7;">${msg}</div>
+    <div class="actions-row">
+      <button class="btn primary" onclick="copiarMensaje()">📋 Copiar</button>
+      <a href="https://wa.me/?text=${encodeURIComponent(msg)}" target="_blank" class="btn" style="text-decoration:none;">📱 Abrir en WhatsApp</a>
+    </div>
+  `;
+  window._waMensaje = msg;
+}
+
+function copiarMensaje() {
+  navigator.clipboard.writeText(window._waMensaje || '').then(() => {
+    const btn = event.target;
+    btn.textContent = '✓ Copiado';
+    setTimeout(() => btn.textContent = '📋 Copiar', 2000);
+  });
 }
 
 function exportCSV() {
@@ -825,6 +922,18 @@ async function getCalendarEvents() {
   return all.filter(ev => !excluir.includes(ev.colorId));
 }
 
+async function marcarPagadaRapido(sesionId) {
+  const s = DB.sesiones.find(s => s.id === sesionId);
+  if (!s) return;
+  s.estado = s.estado === 'pagada' ? 'pendiente' : 'pagada';
+  await saveSesion(s);
+  const badge = document.getElementById('badge-' + sesionId);
+  const btn = document.getElementById('btn-' + sesionId);
+  if (badge) { badge.className = 'badge ' + s.estado; badge.textContent = s.estado === 'pagada' ? 'Pagada' : 'Pendiente'; }
+  if (btn) { btn.textContent = s.estado === 'pagada' ? '↩ Revertir' : '✓ Pagada'; }
+  renderDashboard();
+}
+
 async function autoSyncCalendar() {
   const el = document.getElementById('gcal-events');
   el.innerHTML = '<div style="font-size:13px;color:var(--text2);">Sincronizando citas...</div>';
@@ -834,6 +943,7 @@ async function autoSyncCalendar() {
     let omitidas = 0;
     let noDetectadas = 0;
     const noDetectadasList = [];
+    const importadasList = [];
     const promises = [];
     for (const ev of events) {
       const fecha = ev.start.date || (ev.start.dateTime ? new Date(ev.start.dateTime).toLocaleDateString('en-CA') : null);
@@ -845,12 +955,27 @@ async function autoSyncCalendar() {
       const ns = { id: String(Date.now() + Math.random()), pacienteId: String(p.id), fecha: String(fecha), tarifa: p.tarifa, estado: 'pendiente', notas: 'Sincronizada de Google Calendar' };
       DB.sesiones.push(ns);
       promises.push(saveSesion(ns));
+      importadasList.push({ns, nombre: p.nombre});
       importadas++;
     }
     await Promise.all(promises);
     
     let html = '';
-    if (importadas > 0) html += `<div class="alert success">✓ ${importadas} cita(s) nueva(s) importada(s) automáticamente.</div>`;
+    if (importadas > 0) {
+      html += `<div class="alert success">✓ ${importadas} cita(s) nueva(s) importada(s) automáticamente.</div>`;
+      html += `<div class="card" style="margin-top:12px;">
+        <div class="card-title">Citas importadas hoy</div>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:10px;">¿Alguna ya fue pagada al momento de la sesión?</p>
+        <table><thead><tr><th>Fecha</th><th>Paciente</th><th>Tarifa</th><th>Estado</th><th></th></tr></thead><tbody>` +
+        importadasList.map(({ns, nombre}) => `<tr>
+          <td>${ns.fecha}</td>
+          <td>${nombre}</td>
+          <td>${new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(ns.tarifa)}</td>
+          <td><span class="badge pendiente" id="badge-${ns.id}">Pendiente</span></td>
+          <td><button class="btn small primary" id="btn-${ns.id}" onclick="marcarPagadaRapido('${ns.id}')">✓ Pagada</button></td>
+        </tr>`).join('') +
+        '</tbody></table></div>';
+    }
     if (omitidas > 0) html += `<div class="alert info">${omitidas} cita(s) ya existían — no se duplicaron.</div>`;
     
     if (noDetectadasList.length > 0) {
