@@ -148,6 +148,11 @@
     </div>
 
     <div class="card" style="margin-top:12px;">
+      <div class="card-title">Por cobrar — mes seleccionado</div>
+      <div id="dash-por-cobrar-mes"></div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
       <div class="card-title">Deudas pendientes — todos los meses</div>
       <div id="dash-debts"></div>
     </div>
@@ -676,9 +681,21 @@ function renderDashboard() {
     ? monthly.map(m => `<div class="bar-row"><div class="bar-label">${m.mes}</div><div class="bar-track"><div class="bar-fill" style="width:${Math.round(m.val/maxM*100)}%"></div></div><div class="bar-val">${fmt(m.val)}</div></div>`).join('')
     : '<div class="empty">Sin datos registrados aún en ' + year + '.</div>';
 
+  // Por cobrar este mes
+  const porCobrarMes = DB.pacientes.map(p => {
+    const sesPend = ses.filter(s => String(s.pacienteId) === String(p.id) && s.estado !== 'pagada');
+    return { nombre: p.nombre, sesiones: sesPend.length, monto: sesPend.reduce((a,s) => a + s.tarifa, 0) };
+  }).filter(p => p.monto > 0).sort((a,b) => b.monto - a.monto);
+
+  document.getElementById('dash-por-cobrar-mes').innerHTML = porCobrarMes.length
+    ? '<table><thead><tr><th>Paciente</th><th>Sesiones pendientes</th><th>Monto</th></tr></thead><tbody>' +
+      porCobrarMes.map(p => `<tr><td>${p.nombre}</td><td>${p.sesiones}</td><td><span class="badge pendiente">${fmt(p.monto)}</span></td></tr>`).join('') +
+      '</tbody></table>'
+    : '<div class="empty">Sin cobros pendientes este mes. ✓</div>';
+
   const deudores = DB.pacientes.map(p => ({
     nombre: p.nombre,
-    deuda: DB.sesiones.filter(s => s.pacienteId === p.id && s.estado !== 'pagada').reduce((a,s) => a + s.tarifa, 0)
+    deuda: DB.sesiones.filter(s => String(s.pacienteId) === String(p.id) && s.estado !== 'pagada').reduce((a,s) => a + s.tarifa, 0)
   })).filter(p => p.deuda > 0).sort((a,b) => b.deuda - a.deuda);
 
   document.getElementById('dash-debts').innerHTML = deudores.length
