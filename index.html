@@ -509,7 +509,7 @@ function renderPacientes() {
       const cumpleStr = p.cumple ? '<br><span style="font-size:11px;color:var(--text3)">🎂 ' + p.cumple.substring(5).replace('-','/') + '</span>' : '';
       return `<tr>
         <td><strong style="font-weight:500">${p.nombre}</strong>${p.notas ? '<br><span style="font-size:11px;color:var(--text3)">' + p.notas + '</span>' : ''}${p.email ? '<br><span style="font-size:11px;color:var(--text3)">' + p.email + '</span>' : ''}${cumpleStr}</td>
-        <td>${fmt(p.tarifa)}</td>
+        <td id="tarifa-cell-${p.id}">${fmt(p.tarifa)}</td>
         <td>${ses.length}</td>
         <td>${deuda > 0 ? '<span class="badge deuda">' + fmt(deuda) + '</span>' : '<span class="badge pagada">Al día</span>'}</td>
         <td>
@@ -520,11 +520,26 @@ function renderPacientes() {
     }).join('') + '</tbody></table>';
 }
 
-async function editTarifa(id) {
-  const p = DB.pacientes.find(p => p.id === id);
+function editTarifa(id) {
+  const p = DB.pacientes.find(p => String(p.id) === String(id));
   if (!p) return;
-  const nueva = prompt(`Tarifa actual de ${p.nombre}: ${fmt(p.tarifa)}\nIngresa la nueva tarifa:`, p.tarifa);
-  if (nueva && !isNaN(parseInt(nueva))) { p.tarifa = parseInt(nueva); await savePaciente(p); renderPacientes(); }
+  const cell = document.getElementById('tarifa-cell-' + id);
+  if (!cell) return;
+  cell.innerHTML = `<input type="number" id="tarifa-input-${id}" value="${p.tarifa}" style="width:100px;padding:4px;font-size:13px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);" onkeydown="if(event.key==='Enter')guardarTarifa('${id}')" />
+    <button class="btn small primary" onclick="guardarTarifa('${id}')" style="margin-left:4px;">✓</button>
+    <button class="btn small" onclick="renderPacientes()" style="margin-left:2px;">✕</button>`;
+  document.getElementById('tarifa-input-' + id)?.focus();
+}
+
+async function guardarTarifa(id) {
+  const p = DB.pacientes.find(p => String(p.id) === String(id));
+  const input = document.getElementById('tarifa-input-' + id);
+  if (!p || !input) return;
+  const nueva = parseInt(input.value);
+  if (!nueva || isNaN(nueva)) { alert('Ingresa un valor válido.'); return; }
+  p.tarifa = nueva;
+  await savePaciente(p);
+  renderPacientes();
 }
 
 async function deletePaciente(id) {
