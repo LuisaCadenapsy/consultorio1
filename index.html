@@ -189,6 +189,9 @@
 
     <div class="card">
       <div class="card-title">Pacientes registrados</div>
+      <div style="margin-bottom:12px;">
+        <input id="buscar-paciente" placeholder="🔍 Buscar por nombre..." oninput="renderPacientes()" style="width:100%;max-width:300px;" />
+      </div>
       <div id="pacientes-list"></div>
     </div>
   </div>
@@ -506,10 +509,12 @@ async function confirmImportCSV() {
 
 function renderPacientes() {
   const el = document.getElementById('pacientes-list');
-  if (!DB.pacientes.length) { el.innerHTML = '<div class="empty">Aún no hay pacientes registrados.</div>'; return; }
+  const buscar = document.getElementById('buscar-paciente')?.value?.toLowerCase() || '';
+  const pacientesFiltrados = buscar ? DB.pacientes.filter(p => p.nombre.toLowerCase().includes(buscar)) : DB.pacientes;
+  if (!pacientesFiltrados.length) { el.innerHTML = '<div class="empty">No se encontraron pacientes.</div>'; return; }
   el.innerHTML = '<table><thead><tr><th>Nombre</th><th>Tarifa</th><th>Sesiones</th><th>Deuda pendiente</th><th></th></tr></thead><tbody>' +
-    DB.pacientes.map(p => {
-      const ses = DB.sesiones.filter(s => s.pacienteId === p.id);
+    pacientesFiltrados.map(p => {
+      const ses = DB.sesiones.filter(s => String(s.pacienteId) === String(p.id));
       const deuda = ses.filter(s => s.estado !== 'pagada').reduce((a,s) => a + s.tarifa, 0);
       const cumpleStr = p.cumple ? '<br><span style="font-size:11px;color:var(--text3)">🎂 ' + p.cumple.substring(5).replace('-','/') + '</span>' : '';
       return `<tr>
@@ -684,12 +689,21 @@ function renderDashboard() {
   // Por cobrar este mes
   const porCobrarMes = DB.pacientes.map(p => {
     const sesPend = ses.filter(s => String(s.pacienteId) === String(p.id) && s.estado !== 'pagada');
-    return { nombre: p.nombre, sesiones: sesPend.length, monto: sesPend.reduce((a,s) => a + s.tarifa, 0) };
+    return { id: p.id, nombre: p.nombre, sesiones: sesPend.length, monto: sesPend.reduce((a,s) => a + s.tarifa, 0) };
   }).filter(p => p.monto > 0).sort((a,b) => b.monto - a.monto);
 
+  const mensajesEnv = getMensajesEnviados(month, year);
   document.getElementById('dash-por-cobrar-mes').innerHTML = porCobrarMes.length
-    ? '<table><thead><tr><th>Paciente</th><th>Sesiones pendientes</th><th>Monto</th></tr></thead><tbody>' +
-      porCobrarMes.map(p => `<tr><td>${p.nombre}</td><td>${p.sesiones}</td><td><span class="badge pendiente">${fmt(p.monto)}</span></td></tr>`).join('') +
+    ? '<table><thead><tr><th>Paciente</th><th>Sesiones pendientes</th><th>Monto</th><th>Msg enviado</th></tr></thead><tbody>' +
+      porCobrarMes.map(p => {
+        const enviado = mensajesEnv[String(p.id)];
+        return `<tr>
+          <td>${p.nombre}</td>
+          <td>${p.sesiones}</td>
+          <td><span class="badge pendiente">${fmt(p.monto)}</span></td>
+          <td><button class="btn small ${enviado ? 'primary' : ''}" onclick="toggleMensajeEnviado('${p.id}', ${month}, ${year})" title="${enviado ? 'Marcado como enviado' : 'Marcar como enviado'}">${enviado ? '✓ Enviado' : '— Pendiente'}</button></td>
+        </tr>`;
+      }).join('') +
       '</tbody></table>'
     : '<div class="empty">Sin cobros pendientes este mes. ✓</div>';
 
@@ -751,6 +765,23 @@ function previewExport() {
 
 const MESES_FULL = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 
+function getMensajesKey(mes, año) { return `mensajes_${año}_${mes}`; }
+
+function getMensajesEnviados(mes, año) {
+  try { return JSON.parse(localStorage.getItem(getMensajesKey(mes, año)) || '{}'); }
+  catch(e) { return {}; }
+}
+
+function toggleMensajeEnviado(pacienteId, mes, año) {
+  const key = getMensajesKey(mes, año);
+  const data = getMensajesEnviados(mes, año);
+  if (data[pacienteId]) { delete data[pacienteId]; }
+  else { data[pacienteId] = Date.now(); }
+  localStorage.setItem(key, JSON.stringify(data));
+  renderDashboard();
+  renderCobros();
+}
+
 function generarMensajeWA() {
   const mes = parseInt(document.getElementById('wa-mes').value);
   const año = parseInt(document.getElementById('wa-año').value);
@@ -805,14 +836,25 @@ Cuando esté bien para ti, me avisas. No hay afán. 🤍
 Luisa`;
   }
 
+  const mensajesEnvWA = getMensajesEnviados(mes, año);
+  const yaEnviado = mensajesEnvWA[String(pid)];
+  
   el.innerHTML = `
     <div style="background:var(--bg2);border-radius:var(--radius);padding:1rem;margin-bottom:12px;white-space:pre-wrap;font-size:13px;line-height:1.7;">${msg}</div>
     <div class="actions-row">
       <button class="btn primary" onclick="copiarMensaje()">📋 Copiar</button>
       <a href="https://wa.me/?text=${encodeURIComponent(msg)}" target="_blank" class="btn" style="text-decoration:none;">📱 Abrir en WhatsApp</a>
+      <button class="btn ${yaEnviado ? 'primary' : ''}" id="btn-enviado-wa" onclick="marcarEnviadoWA('${pid}', ${mes}, ${año})">${yaEnviado ? '✓ Mensaje enviado' : 'Marcar como enviado'}</button>
     </div>
+    ${yaEnviado ? '<div class="alert success" style="margin-top:8px;">✓ Ya enviaste este mensaje a ' + nombre + ' este mes.</div>' : ''}
   `;
   window._waMensaje = msg;
+}
+
+function marcarEnviadoWA(pid, mes, año) {
+  toggleMensajeEnviado(pid, mes, año);
+  // Re-generate to refresh status
+  generarMensajeWA();
 }
 
 function copiarMensaje() {
