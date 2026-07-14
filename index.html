@@ -841,12 +841,17 @@ function generarMensajeWA() {
   const fraseTexto = '\n\n' + fraseMes.frase + '\n— ' + fraseMes.autor;
   let msg = '';
   if (pendientes.length === 0) {
+  const fmtFecha = f => { const p = (f||'').split('-'); return parseInt(p[2]) + ' ' + MESES_FULL[parseInt(p[1])-1].substring(0,3); };
+  const fechasPagadas = pagadas.map(s => fmtFecha(s.fecha)).join(', ');
+  const fechasPendientes = pendientes.map(s => fmtFecha(s.fecha)).join(', ');
+  const fechasTodas = ses.map(s => fmtFecha(s.fecha)).join(', ');
     msg = `Hola ${nombre} 🌿
 
 Quiero agradecerte por tu constancia este mes. Es un privilegio acompañarte en este proceso.
 
 Tu resumen de ${MESES_FULL[mes]}:
 • ${pagadas.length} sesión(es) — ${fmt(totalPag)} ✓ pagado
+• Fechas: ${fechasPagadas}
 
 ¡Todo al día! Cuando sientas que es buen momento para ti, seguimos. No hay afán. 🤍` + fraseTexto + `
 
@@ -857,11 +862,11 @@ Luisa`;
 Quiero agradecerte por tu presencia y tu confianza este mes. Es un honor acompañarte.
 
 Tu resumen de ${MESES_FULL[mes]}:
-• ${ses.length} sesión(es) en total`;
+• ${ses.length} sesión(es) — Fechas: ${fechasTodas}`;
     if (pagadas.length > 0) msg += `
 • ${fmt(totalPag)} ya pagado ✓`;
     msg += `
-• Saldo pendiente: ${fmt(totalPend)}`;
+• Saldo pendiente: ${fmt(totalPend)} (${fechasPendientes})`;
     msg += `\n\nCuando esté bien para ti, me avisas. No hay afán. 🤍` + fraseTexto + `\n\nLuisa`;
   }
 
