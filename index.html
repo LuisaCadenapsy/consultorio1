@@ -835,7 +835,8 @@ function generarMensajeWA() {
   const totalPag = pagadas.reduce((a,s) => a + s.tarifa, 0);
   const fmt = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n);
 
-  const nombre = p.nombre.split(' ')[0];
+  const nombreRaw = p.nombre.split(' ')[0];
+  const nombre = nombreRaw.charAt(0).toUpperCase() + nombreRaw.slice(1).toLowerCase();
 
   const fraseMes = FRASES_MES[mes];
   const fraseTexto = '\n\n' + fraseMes.frase + '\n— ' + fraseMes.autor;
@@ -853,7 +854,7 @@ Tu resumen de ${MESES_FULL[mes]}:
 • ${pagadas.length} sesión(es) — ${fmt(totalPag)} ✓ pagado
 • Fechas: ${fechasPagadas}
 
-¡Todo al día! Cuando sientas que es buen momento para ti, seguimos. No hay afán. 🤍` + fraseTexto + `
+¡Todo al día! Revisa con tus cuentas y déjame saber si te coincide. Cuando sientas que es buen momento para ti, seguimos. No hay afán. 🤍` + fraseTexto + `
 
 Luisa`;
   } else {
@@ -867,7 +868,7 @@ Tu resumen de ${MESES_FULL[mes]}:
 • ${fmt(totalPag)} ya pagado ✓`;
     msg += `
 • Saldo pendiente: ${fmt(totalPend)} (${fechasPendientes})`;
-    msg += `\n\nCuando esté bien para ti, me avisas. No hay afán. 🤍` + fraseTexto + `\n\nLuisa`;
+    msg += `\n\nRevisa con tus cuentas y déjame saber si te coincide. Cuando esté bien para ti, me avisas. No hay afán. 🤍` + fraseTexto + `\n\nLuisa`;
   }
 
   const mensajesEnvWA = getMensajesEnviados(mes, año);
