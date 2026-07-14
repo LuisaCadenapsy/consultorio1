@@ -739,7 +739,6 @@ function renderCobros() {
     wasel.innerHTML = '<option value="">— Seleccionar paciente —</option>' +
       DB.pacientes.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
   }
-  const el = document.getElementById('cobros-content');
   const buscarCobros = document.getElementById('buscar-cobros')?.value?.toLowerCase() || '';
   const el = document.getElementById('cobros-content');
   const deudores = DB.pacientes.map(p => {
