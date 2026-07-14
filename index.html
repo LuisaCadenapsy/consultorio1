@@ -248,6 +248,9 @@
   <div id="s-cobros" class="section">
     <div class="card">
       <div class="card-title">Saldos pendientes por paciente</div>
+      <div style="margin-bottom:12px;">
+        <input id="buscar-cobros" placeholder="🔍 Buscar paciente..." oninput="renderCobros()" style="width:100%;max-width:300px;" />
+      </div>
       <div id="cobros-content"></div>
     </div>
 
@@ -737,11 +740,12 @@ function renderCobros() {
       DB.pacientes.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
   }
   const el = document.getElementById('cobros-content');
+  const buscarCobros = document.getElementById('buscar-cobros')?.value?.toLowerCase() || '';
+  const el = document.getElementById('cobros-content');
   const deudores = DB.pacientes.map(p => {
-    const ses = DB.sesiones.filter(s => s.pacienteId === p.id && s.estado !== 'pagada');
+    const ses = DB.sesiones.filter(s => String(s.pacienteId) === String(p.id) && s.estado !== 'pagada');
     return { ...p, sesPend: ses, deuda: ses.reduce((a,s) => a + s.tarifa, 0) };
-  }).filter(p => p.deuda > 0).sort((a,b) => b.deuda - a.deuda);
-
+  }).filter(p => p.deuda > 0 && (!buscarCobros || p.nombre.toLowerCase().includes(buscarCobros))).sort((a,b) => b.deuda - a.deuda);
   if (!deudores.length) { el.innerHTML = '<div class="empty">Sin deudas pendientes. Todo al día. ✓</div>'; return; }
   el.innerHTML = '<table><thead><tr><th>Paciente</th><th>Sesiones</th><th>Deuda total</th><th></th></tr></thead><tbody>' +
     deudores.map(p => {
