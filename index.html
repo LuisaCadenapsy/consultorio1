@@ -840,11 +840,11 @@ function generarMensajeWA() {
   const fraseMes = FRASES_MES[mes];
   const fraseTexto = '\n\n' + fraseMes.frase + '\n— ' + fraseMes.autor;
   let msg = '';
-  if (pendientes.length === 0) {
   const fmtFecha = f => { const p = (f||'').split('-'); return parseInt(p[2]) + ' ' + MESES_FULL[parseInt(p[1])-1].substring(0,3); };
   const fechasPagadas = pagadas.map(s => fmtFecha(s.fecha)).join(', ');
   const fechasPendientes = pendientes.map(s => fmtFecha(s.fecha)).join(', ');
   const fechasTodas = ses.map(s => fmtFecha(s.fecha)).join(', ');
+  if (pendientes.length === 0) {
     msg = `Hola ${nombre} 🌿
 
 Quiero agradecerte por tu constancia este mes. Es un privilegio acompañarte en este proceso.
