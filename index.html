@@ -727,9 +727,12 @@ function filtrarPacientesWA() {
   const buscar = document.getElementById('buscar-wa-paciente')?.value?.toLowerCase() || '';
   const wasel = document.getElementById('wa-paciente');
   if (!wasel) return;
-  const filtrados = buscar ? DB.pacientes.filter(p => p.nombre.toLowerCase().includes(buscar)) : DB.pacientes;
+  const fuente = DB.pacientes.length ? DB.pacientes : [];
+  const filtrados = buscar ? fuente.filter(p => p.nombre.toLowerCase().includes(buscar)) : fuente;
   wasel.innerHTML = '<option value="">— Seleccionar paciente —</option>' +
     filtrados.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+  // Auto-select if only one result
+  if (filtrados.length === 1) wasel.value = filtrados[0].id;
 }
 
 function renderCobros() {
