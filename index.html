@@ -262,6 +262,7 @@
           <option value="9">Octubre</option><option value="10">Noviembre</option><option value="11">Diciembre</option>
         </select>
         <select id="wa-año"><option value="2025">2025</option><option value="2026" selected>2026</option></select>
+        <input id="buscar-wa-paciente" placeholder="🔍 Buscar paciente..." oninput="filtrarPacientesWA()" style="min-width:180px;" />
         <select id="wa-paciente" style="min-width:180px;"><option value="">— Seleccionar paciente —</option></select>
         <button class="btn primary" onclick="generarMensajeWA()">Generar mensaje</button>
       </div>
@@ -719,6 +720,15 @@ function renderDashboard() {
 }
 
 /* ---- COBROS ---- */
+function filtrarPacientesWA() {
+  const buscar = document.getElementById('buscar-wa-paciente')?.value?.toLowerCase() || '';
+  const wasel = document.getElementById('wa-paciente');
+  if (!wasel) return;
+  const filtrados = buscar ? DB.pacientes.filter(p => p.nombre.toLowerCase().includes(buscar)) : DB.pacientes;
+  wasel.innerHTML = '<option value="">— Seleccionar paciente —</option>' +
+    filtrados.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+}
+
 function renderCobros() {
   // Populate WhatsApp patient select
   const wasel = document.getElementById('wa-paciente');
@@ -765,6 +775,21 @@ function previewExport() {
 
 const MESES_FULL = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 
+const FRASES_MES = [
+  { frase: '"El que mira hacia afuera sueña; el que mira hacia adentro despierta."', autor: 'C.G. Jung' },           // enero
+  { frase: '"No somos heridos por lo que nos falta, sino por lo que no hemos podido aún reconocer en nosotros mismos."', autor: 'C.G. Jung' }, // febrero
+  { frase: '"Solo podemos aprender a conocer a otros en la medida en que nos conocemos a nosotros mismos."', autor: 'Goethe' }, // marzo
+  { frase: '"Todo lo que te irrita de los demás puede llevarte a una comprensión de ti mismo."', autor: 'C.G. Jung' }, // abril
+  { frase: '"El que mira hacia afuera sueña; el que mira hacia adentro despierta."', autor: 'C.G. Jung' },           // mayo
+  { frase: '"Las heridas son el lugar por donde entra la luz."', autor: 'Rumi' },                                     // junio
+  { frase: '"Todo lo que te irrita de los demás puede llevarte a una comprensión de ti mismo."', autor: 'C.G. Jung' }, // julio
+  { frase: '"Toda relación profunda es una escuela del alma."', autor: 'Thomas Moore' },                              // agosto
+  { frase: '"Nadie te salvará. Esa es tu tarea — y vale la pena emprenderla."', autor: 'Clarissa Pinkola Estés' },   // septiembre
+  { frase: '"El sufrimiento que no se transforma se transmite."', autor: 'Richard Rohr' },                           // octubre
+  { frase: '"Quizás todo el dragón de nuestra vida sea una princesa que solo espera vernos actuar con valentía."', autor: 'Rilke' }, // noviembre
+  { frase: '"El fin de algo es solo el comienzo de algo que aún no tiene nombre."', autor: 'C.G. Jung' }             // diciembre
+];
+
 function getMensajesKey(mes, año) { return `mensajes_${año}_${mes}`; }
 
 function getMensajesEnviados(mes, año) {
@@ -806,6 +831,8 @@ function generarMensajeWA() {
 
   const nombre = p.nombre.split(' ')[0];
 
+  const fraseMes = FRASES_MES[mes];
+  const fraseTexto = '\n\n' + fraseMes.frase + '\n— ' + fraseMes.autor;
   let msg = '';
   if (pendientes.length === 0) {
     msg = `Hola ${nombre} 🌿
@@ -815,7 +842,7 @@ Quiero agradecerte por tu constancia este mes. Es un privilegio acompañarte en 
 Tu resumen de ${MESES_FULL[mes]}:
 • ${pagadas.length} sesión(es) — ${fmt(totalPag)} ✓ pagado
 
-¡Todo al día! Cuando sientas que es buen momento para ti, seguimos. No hay afán. 🤍
+¡Todo al día! Cuando sientas que es buen momento para ti, seguimos. No hay afán. 🤍` + fraseTexto + `
 
 Luisa`;
   } else {
@@ -829,11 +856,7 @@ Tu resumen de ${MESES_FULL[mes]}:
 • ${fmt(totalPag)} ya pagado ✓`;
     msg += `
 • Saldo pendiente: ${fmt(totalPend)}`;
-    msg += `
-
-Cuando esté bien para ti, me avisas. No hay afán. 🤍
-
-Luisa`;
+    msg += `\n\nCuando esté bien para ti, me avisas. No hay afán. 🤍` + fraseTexto + `\n\nLuisa`;
   }
 
   const mensajesEnvWA = getMensajesEnviados(mes, año);
