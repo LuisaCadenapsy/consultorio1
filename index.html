@@ -386,12 +386,12 @@ let gisInited = false;
 
 async function initFirebase() {
   const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
-  const { getFirestore, collection, getDocs, doc, setDoc, deleteDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  const { getFirestore, collection, getDocs, doc, setDoc, deleteDoc, getDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
   firebaseApp = initializeApp(firebaseConfig);
   db = getFirestore(firebaseApp);
   pacientesRef = collection(db, 'pacientes');
   sesionesRef = collection(db, 'sesiones');
-  window._fb = { collection, getDocs, doc, setDoc, deleteDoc };
+  window._fb = { collection, getDocs, doc, setDoc, deleteDoc, getDoc };
   await loadFromFirebase();
   renderPacientes();
   populateSelects();
@@ -805,23 +805,24 @@ async function getMensajesEnviados(mes, año) {
   const key = getMensajesKey(mes, año);
   if (window._mensajesCache[key] !== undefined) return window._mensajesCache[key];
   try {
-    const { doc, getDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+    const { doc, getDoc } = window._fb;
     const snap = await getDoc(doc(db, 'mensajes_enviados', key));
     const data = snap.exists() ? snap.data() : {};
     window._mensajesCache[key] = data;
     return data;
-  } catch(e) { return {}; }
+  } catch(e) { console.error('getMensajesEnviados error:', e); return {}; }
 }
 
 async function toggleMensajeEnviado(pacienteId, mes, año) {
   const key = getMensajesKey(mes, año);
   const data = await getMensajesEnviados(mes, año);
-  if (data[pacienteId]) { delete data[pacienteId]; }
-  else { data[pacienteId] = Date.now(); }
+  if (data[String(pacienteId)]) { delete data[String(pacienteId)]; }
+  else { data[String(pacienteId)] = Date.now(); }
   window._mensajesCache[key] = data;
   try {
-    const { doc, setDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+    const { doc, setDoc } = window._fb;
     await setDoc(doc(db, 'mensajes_enviados', key), data);
+    console.log('Mensaje enviado guardado en Firebase:', key, data);
   } catch(e) { console.error('Error guardando mensaje enviado:', e); }
   renderDashboard();
   renderCobros();
