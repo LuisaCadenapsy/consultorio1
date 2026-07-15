@@ -655,7 +655,7 @@ function getMonthSes(month, year) {
   });
 }
 
-function renderDashboard() {
+async function renderDashboard() {
   const month = parseInt(document.getElementById('dash-month').value);
   const year = parseInt(document.getElementById('dash-year').value);
   const ses = getMonthSes(month, year);
@@ -696,7 +696,7 @@ function renderDashboard() {
     return { id: p.id, nombre: p.nombre, sesiones: sesPend.length, monto: sesPend.reduce((a,s) => a + s.tarifa, 0) };
   }).filter(p => p.monto > 0).sort((a,b) => b.monto - a.monto);
 
-  const mensajesEnv = getMensajesEnviados(month, year);
+  const mensajesEnv = await getMensajesEnviados(month, year);
   document.getElementById('dash-por-cobrar-mes').innerHTML = porCobrarMes.length
     ? '<table><thead><tr><th>Paciente</th><th>Sesiones pendientes</th><th>Monto</th><th>Msg enviado</th></tr></thead><tbody>' +
       porCobrarMes.map(p => {
@@ -798,22 +798,36 @@ const FRASES_MES = [
 
 function getMensajesKey(mes, año) { return `mensajes_${año}_${mes}`; }
 
-function getMensajesEnviados(mes, año) {
-  try { return JSON.parse(localStorage.getItem(getMensajesKey(mes, año)) || '{}'); }
-  catch(e) { return {}; }
+// Cache local para no leer Firebase en cada render
+window._mensajesCache = {};
+
+async function getMensajesEnviados(mes, año) {
+  const key = getMensajesKey(mes, año);
+  if (window._mensajesCache[key] !== undefined) return window._mensajesCache[key];
+  try {
+    const { doc, getDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+    const snap = await getDoc(doc(db, 'mensajes_enviados', key));
+    const data = snap.exists() ? snap.data() : {};
+    window._mensajesCache[key] = data;
+    return data;
+  } catch(e) { return {}; }
 }
 
-function toggleMensajeEnviado(pacienteId, mes, año) {
+async function toggleMensajeEnviado(pacienteId, mes, año) {
   const key = getMensajesKey(mes, año);
-  const data = getMensajesEnviados(mes, año);
+  const data = await getMensajesEnviados(mes, año);
   if (data[pacienteId]) { delete data[pacienteId]; }
   else { data[pacienteId] = Date.now(); }
-  localStorage.setItem(key, JSON.stringify(data));
+  window._mensajesCache[key] = data;
+  try {
+    const { doc, setDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+    await setDoc(doc(db, 'mensajes_enviados', key), data);
+  } catch(e) { console.error('Error guardando mensaje enviado:', e); }
   renderDashboard();
   renderCobros();
 }
 
-function generarMensajeWA() {
+async function generarMensajeWA() {
   const mes = parseInt(document.getElementById('wa-mes').value);
   const año = parseInt(document.getElementById('wa-año').value);
   const pid = document.getElementById('wa-paciente').value;
@@ -871,7 +885,7 @@ Tu resumen de ${MESES_FULL[mes]}:
     msg += `\n\nRevisa con tus cuentas y déjame saber si te coincide. Cuando esté bien para ti, me avisas. No hay afán. 🤍` + fraseTexto + `\n\nLuisa`;
   }
 
-  const mensajesEnvWA = getMensajesEnviados(mes, año);
+  const mensajesEnvWA = await getMensajesEnviados(mes, año);
   const yaEnviado = mensajesEnvWA[String(pid)];
   
   el.innerHTML = `
