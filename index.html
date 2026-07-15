@@ -136,6 +136,11 @@
 
     <div class="grid-4" id="dash-metrics"></div>
 
+    <div class="card" id="dash-proyeccion-card" style="display:none;margin-bottom:12px;">
+      <div class="card-title">📈 Proyección del mes</div>
+      <div id="dash-proyeccion"></div>
+    </div>
+
     <div class="dash-grid">
       <div class="card">
         <div class="card-title">Ingresos por paciente</div>
@@ -663,6 +668,36 @@ async function renderDashboard() {
   const porCobrar = ses.filter(s => s.estado !== 'pagada').reduce((a,s) => a + s.tarifa, 0);
   const deudaTotal = DB.sesiones.filter(s => s.estado !== 'pagada').reduce((a,s) => a + s.tarifa, 0);
   const promedio = ses.length ? Math.round(cobrado / Math.max(ses.filter(s=>s.estado==='pagada').length, 1)) : 0;
+
+  // Proyección del mes
+  const totalMes = ses.reduce((a,s) => a + s.tarifa, 0);
+  const hoy = new Date();
+  const primerDiaMes = new Date(year, month, 1);
+  const ultimoDiaMes = new Date(year, month + 1, 0);
+  const diasTranscurridos = Math.max(1, Math.ceil((hoy - primerDiaMes) / (1000 * 60 * 60 * 24)));
+  const diasTotales = ultimoDiaMes.getDate();
+  const proyeccion = Math.round(totalMes / diasTranscurridos * diasTotales);
+  const porcentaje = Math.min(100, Math.round(diasTranscurridos / diasTotales * 100));
+  const esMesActual = hoy.getMonth() === month && hoy.getFullYear() === year;
+  
+  const cardProy = document.getElementById('dash-proyeccion-card');
+  const elProy = document.getElementById('dash-proyeccion');
+  if (cardProy && elProy && esMesActual && totalMes > 0) {
+    cardProy.style.display = 'block';
+    elProy.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+        <div class="metric"><div class="metric-label">Total registrado</div><div class="metric-value">${fmt(totalMes)}</div><div class="metric-sub">${ses.length} sesiones registradas</div></div>
+        <div class="metric"><div class="metric-label">Proyección mes completo</div><div class="metric-value">${fmt(proyeccion)}</div><div class="metric-sub">Basado en ${porcentaje}% del mes transcurrido</div></div>
+        <div class="metric"><div class="metric-label">Días transcurridos</div><div class="metric-value">${diasTranscurridos} / ${diasTotales}</div><div class="metric-sub">del mes en curso</div></div>
+      </div>
+      <div style="margin-top:10px;height:6px;background:var(--bg2);border-radius:3px;overflow:hidden;">
+        <div style="height:100%;width:${porcentaje}%;background:var(--text);border-radius:3px;transition:width 0.4s;"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px;">${porcentaje}% del mes completado</div>
+    `;
+  } else if (cardProy) {
+    cardProy.style.display = 'none';
+  }
 
   document.getElementById('dash-metrics').innerHTML = `
     <div class="metric"><div class="metric-label">Ingresos cobrados</div><div class="metric-value">${fmt(cobrado)}</div><div class="metric-sub">${ses.filter(s=>s.estado==='pagada').length} sesiones pagadas</div></div>
