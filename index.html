@@ -1124,8 +1124,6 @@ async function autoSyncCalendar() {
       const pidStr = String(p.id).trim();
       const existe = DB.sesiones.find(s => String(s.pacienteId).trim() === pidStr && String(s.fecha).trim() === fechaStr);
       if (existe) { omitidas++; continue; }
-      // Debug: log nuevas citas que se van a importar
-      if (fechaStr >= '2026-07-21') console.log('IMPORTANDO:', p.nombre, fechaStr);
       const ns = { id: String(Date.now() + Math.random()), pacienteId: String(p.id), fecha: String(fecha), tarifa: p.tarifa, estado: 'pendiente', notas: 'Sincronizada de Google Calendar' };
       DB.sesiones.push(ns);
       promises.push(saveSesion(ns));
@@ -1269,3 +1267,4 @@ initFirebase().catch(err => {
 <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
+
