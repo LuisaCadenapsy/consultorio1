@@ -1065,12 +1065,37 @@ function matchPaciente(titulo) {
   });
 }
 
+async function getUltimaSincronizacion() {
+  try {
+    const { doc, getDoc } = window._fb;
+    const snap = await getDoc(doc(db, 'config', 'gcal_sync'));
+    if (snap.exists() && snap.data().lastSync) return new Date(snap.data().lastSync);
+    return null;
+  } catch(e) { console.error('Error leyendo última sincronización:', e); return null; }
+}
+
+async function guardarUltimaSincronizacion(fecha) {
+  try {
+    const { doc, setDoc } = window._fb;
+    await setDoc(doc(db, 'config', 'gcal_sync'), { lastSync: fecha.toISOString() });
+  } catch(e) { console.error('Error guardando última sincronización:', e); }
+}
+
 async function getCalendarEvents() {
   const today = new Date();
   today.setHours(23,59,59,999); // hasta el final de hoy
 
-  // Cargar solo los últimos 2 meses para no exceder el límite de 500 eventos
-  const start = new Date(today.getFullYear(), today.getMonth() - 1, 1); // primer día del mes anterior
+  // El punto de partida se calcula a partir de la última sincronización exitosa
+  // guardada en Firebase. Si nunca se ha sincronizado, se usa un respaldo de
+  // dos meses hacia atrás para capturar el historial reciente una sola vez.
+  const ultimaSync = await getUltimaSincronizacion();
+  let start;
+  if (ultimaSync) {
+    // Un día de margen hacia atrás para cubrir cualquier evento en el límite exacto
+    start = new Date(ultimaSync.getTime() - 24*60*60*1000);
+  } else {
+    start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  }
   const end = today;
 
   const resp = await gapi.client.calendar.events.list({
@@ -1082,10 +1107,15 @@ async function getCalendarEvents() {
     maxResults: 500
   });
   const all = resp.result.items || [];
+  const huboLimite = all.length >= 500;
+  if (huboLimite) {
+    console.warn('La consulta devolvió 500 eventos — es posible que existan eventos adicionales sin traer en este rango.');
+  }
   // Excluir solo citas con colores específicos que no son pacientes
   // Amarillo (5=Banana), Azul oscuro (9=Blueberry), Rojo (11=Tomato), Gris (8=Graphite)
   const excluir = ['5', '9', '11', '8'];
-  return all.filter(ev => !excluir.includes(ev.colorId));
+  const filtrados = all.filter(ev => !excluir.includes(ev.colorId));
+  return { eventos: filtrados, huboLimite, end };
 }
 
 async function marcarPagadaRapido(sesionId) {
@@ -1108,7 +1138,7 @@ async function autoSyncCalendar() {
   try {
     // Recargar sesiones desde Firebase antes de sincronizar para evitar falsos duplicados
     await loadFromFirebase();
-    const events = await getCalendarEvents();
+    const { eventos: events, huboLimite, end } = await getCalendarEvents();
     let importadas = 0;
     let omitidas = 0;
     let noDetectadas = 0;
@@ -1131,8 +1161,18 @@ async function autoSyncCalendar() {
       importadas++;
     }
     await Promise.all(promises);
+
+    // Solo se guarda la marca de última sincronización si la consulta no chocó
+    // contra el límite de 500 eventos — si lo hizo, es mejor reintentar sin
+    // avanzar el punto de corte, para no dejar eventos sin revisar.
+    if (!huboLimite) {
+      await guardarUltimaSincronizacion(end);
+    }
     
     let html = '';
+    if (huboLimite) {
+      html += `<div class="alert warning">La consulta alcanzó el límite de 500 eventos. Puede haber citas más recientes sin importar — se recomienda sincronizar de nuevo en un momento.</div>`;
+    }
     if (importadas > 0) {
       html += `<div class="alert success">✓ ${importadas} cita(s) nueva(s) importada(s) automáticamente.</div>`;
       html += `<div class="card" style="margin-top:12px;">
@@ -1168,7 +1208,7 @@ async function autoSyncCalendar() {
     }
     
     if (importadas === 0 && noDetectadasList.length === 0) {
-      html = '<div class="alert info">Todo al día — no hay citas nuevas para importar.</div>';
+      html += '<div class="alert info">Todo al día — no hay citas nuevas para importar.</div>';
     }
     
     el.innerHTML = html;
@@ -1267,4 +1307,3 @@ initFirebase().catch(err => {
 <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
-
