@@ -1160,11 +1160,11 @@ async function autoSyncCalendar() {
         noDetectadasList.map(ev => `<tr>
           <td>${ev.fecha}</td>
           <td>${ev.titulo}</td>
-          <td><select id="sel-${ev.fecha.replace(/-/g,'')}-${btoa(ev.titulo).substring(0,8)}" style="font-size:12px;padding:4px;">
+          <td><select id="sel-${ev.fecha.replace(/-/g,'')}-${ev.titulo.replace(/[^a-zA-Z0-9]/g,'').substring(0,8)}" style="font-size:12px;padding:4px;">
             <option value="">— asignar paciente —</option>
             ${DB.pacientes.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('')}
           </select>
-          <button class="btn small primary" onclick="importManualEvent('${ev.fecha}', 'sel-${ev.fecha.replace(/-/g,'')}-${btoa(ev.titulo).substring(0,8)}')">Importar</button></td>
+          <button class="btn small primary" onclick="importManualEvent('${ev.fecha}', 'sel-${ev.fecha.replace(/-/g,'')}-${ev.titulo.replace(/[^a-zA-Z0-9]/g,'').substring(0,8)}')">Importar</button></td>
         </tr>`).join('') +
         '</tbody></table></div>';
     }
