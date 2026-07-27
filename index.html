@@ -390,10 +390,8 @@ async function waitForFirebase() {
   let tries = 0;
   while (!_firebaseReady && tries < 20) { await new Promise(r => setTimeout(r, 300)); tries++; }
 }
-let _firebaseReady = false;
 async function waitForFirebase() {
   let tries = 0;
-  while (!_firebaseReady && tries < 20) { await new Promise(r => setTimeout(r, 300)); tries++; }
 }
 let tokenClient = null;
 let gapiInited = false;
@@ -411,7 +409,6 @@ async function initFirebase() {
   renderPacientes();
   populateSelects();
   renderDashboard();
-  _firebaseReady = true;
   _firebaseReady = true;
   document.getElementById('fb-status').textContent = 'Conectado a la nube';
   document.getElementById('fb-status').style.color = 'var(--success-text)';
