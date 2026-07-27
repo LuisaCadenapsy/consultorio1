@@ -385,6 +385,16 @@ const firebaseConfig = {
 
 let firebaseApp, db, pacientesRef, sesionesRef;
 let DB = { pacientes: [], sesiones: [] };
+let _firebaseReady = false;
+async function waitForFirebase() {
+  let tries = 0;
+  while (!_firebaseReady && tries < 20) { await new Promise(r => setTimeout(r, 300)); tries++; }
+}
+let _firebaseReady = false;
+async function waitForFirebase() {
+  let tries = 0;
+  while (!_firebaseReady && tries < 20) { await new Promise(r => setTimeout(r, 300)); tries++; }
+}
 let tokenClient = null;
 let gapiInited = false;
 let gisInited = false;
@@ -401,6 +411,8 @@ async function initFirebase() {
   renderPacientes();
   populateSelects();
   renderDashboard();
+  _firebaseReady = true;
+  _firebaseReady = true;
   document.getElementById('fb-status').textContent = 'Conectado a la nube';
   document.getElementById('fb-status').style.color = 'var(--success-text)';
 }
@@ -1098,6 +1110,8 @@ async function marcarPagadaRapido(sesionId) {
 
 async function autoSyncCalendar() {
   const el = document.getElementById('gcal-events');
+  el.innerHTML = '<div style="font-size:13px;color:var(--text2);">Esperando Firebase...</div>';
+  await waitForFirebase();
   el.innerHTML = '<div style="font-size:13px;color:var(--text2);">Sincronizando citas...</div>';
   try {
     // Recargar sesiones desde Firebase antes de sincronizar para evitar falsos duplicados
@@ -1261,3 +1275,4 @@ initFirebase().catch(err => {
 <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
+
