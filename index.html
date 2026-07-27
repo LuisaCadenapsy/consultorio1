@@ -1069,11 +1069,9 @@ async function getCalendarEvents() {
   const today = new Date();
   today.setHours(23,59,59,999); // hasta el final de hoy
 
-  // Desde el 1 de mayo 2026 hasta hoy (nunca futuro)
-  const start = new Date('2026-05-01T00:00:00');
+  // Cargar solo los últimos 2 meses para no exceder el límite de 500 eventos
+  const start = new Date(today.getFullYear(), today.getMonth() - 1, 1); // primer día del mes anterior
   const end = today;
-  // Asegurarse que end nunca sea antes de start
-  if (end < start) end.setTime(start.getTime());
 
   const resp = await gapi.client.calendar.events.list({
     calendarId: 'primary',
