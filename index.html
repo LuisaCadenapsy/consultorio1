@@ -406,8 +406,11 @@ async function initFirebase() {
 }
 
 async function loadFromFirebase() {
-  const { getDocs } = window._fb;
-  const [pSnap, sSnap] = await Promise.all([getDocs(pacientesRef), getDocs(sesionesRef)]);
+  const { getDocs, collection } = window._fb;
+  const [pSnap, sSnap] = await Promise.all([
+    getDocs(collection(db, 'pacientes')),
+    getDocs(collection(db, 'sesiones'))
+  ]);
   DB.pacientes = pSnap.docs.map(d => ({ ...d.data(), id: d.id }));
   DB.sesiones = sSnap.docs.map(d => ({ ...d.data(), id: d.id }));
 }
@@ -1258,4 +1261,3 @@ initFirebase().catch(err => {
 <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
-
