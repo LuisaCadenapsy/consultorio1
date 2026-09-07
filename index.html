@@ -189,6 +189,9 @@
         <div class="form-group"><label>Fecha de cumpleaños</label><input id="p-cumple" type="date" /></div>
         <div class="form-group"><label>Notas clínicas breves</label><input id="p-notas" placeholder="Motivo de consulta, contexto..." /></div>
       </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1 1 100%;"><label>Nota personalizada para mensaje de cobro (opcional)</label><input id="p-nota-msg" placeholder="Frase breve sobre el proceso actual, en tu voz..." /></div>
+      </div>
       <button class="btn primary" onclick="addPaciente()">+ Agregar paciente</button>
     </div>
 
@@ -208,6 +211,15 @@
       <div class="form-row">
         <div class="form-group"><label>Paciente *</label><select id="s-paciente"><option value="">Seleccionar...</option></select></div>
         <div class="form-group"><label>Fecha *</label><input id="s-fecha" type="date" /></div>
+        <div class="form-group"><label>Tipo de tarifa</label>
+          <select id="s-tipo-tarifa" onchange="actualizarTarifaPorDescuento()">
+            <option value="completa">Tarifa completa</option>
+            <option value="media">Media sesión (50%)</option>
+            <option value="cortesia">Cortesía (sin costo)</option>
+            <option value="otro">Descuento personalizado</option>
+          </select>
+        </div>
+        <div class="form-group" id="s-descuento-pct-group" style="display:none;"><label>% de descuento</label><input id="s-descuento-pct" type="number" placeholder="20" min="0" max="100" oninput="actualizarTarifaPorDescuento()" /></div>
         <div class="form-group"><label>Tarifa (COP)</label><input id="s-tarifa" type="number" placeholder="Se autocompleta" /></div>
       </div>
       <div class="form-row">
@@ -396,12 +408,12 @@ let gisInited = false;
 
 async function initFirebase() {
   const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
-  const { getFirestore, collection, getDocs, doc, setDoc, deleteDoc, getDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  const { getFirestore, collection, getDocs, doc, setDoc, deleteDoc, getDoc, query, where } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
   firebaseApp = initializeApp(firebaseConfig);
   db = getFirestore(firebaseApp);
   pacientesRef = collection(db, 'pacientes');
   sesionesRef = collection(db, 'sesiones');
-  window._fb = { collection, getDocs, doc, setDoc, deleteDoc, getDoc };
+  window._fb = { collection, getDocs, doc, setDoc, deleteDoc, getDoc, query, where };
   await loadFromFirebase();
   renderPacientes();
   populateSelects();
@@ -463,10 +475,10 @@ async function addPaciente() {
   const tarifa = parseInt(document.getElementById('p-tarifa').value) || 0;
   if (!nombre) { alert('El nombre es obligatorio.'); return; }
   if (!tarifa) { alert('La tarifa es obligatoria.'); return; }
-  const np = { id: String(Date.now()), nombre, tarifa, email: document.getElementById('p-email').value.trim(), tel: document.getElementById('p-tel').value.trim(), cumple: document.getElementById('p-cumple').value, notas: document.getElementById('p-notas').value.trim(), creado: today() };
+  const np = { id: String(Date.now()), nombre, tarifa, email: document.getElementById('p-email').value.trim(), tel: document.getElementById('p-tel').value.trim(), cumple: document.getElementById('p-cumple').value, notas: document.getElementById('p-notas').value.trim(), notaMensaje: document.getElementById('p-nota-msg').value.trim(), creado: today() };
   DB.pacientes.push(np);
   await savePaciente(np);
-  ['p-nombre','p-tarifa','p-email','p-tel','p-cumple','p-notas'].forEach(id => document.getElementById(id).value = '');
+  ['p-nombre','p-tarifa','p-email','p-tel','p-cumple','p-notas','p-nota-msg'].forEach(id => document.getElementById(id).value = '');
   renderPacientes(); populateSelects();
 }
 
@@ -514,7 +526,7 @@ async function confirmImportCSV() {
   preview.forEach(p => {
     const existe = DB.pacientes.find(x => x.nombre.toLowerCase() === p.nombre.toLowerCase());
     if (existe) { duplicados++; return; }
-    const np = { id: String(Date.now() + Math.random()), nombre: p.nombre, tarifa: p.tarifa, email: '', tel: '', cumple: '', notas: '', creado: today() };
+    const np = { id: String(Date.now() + Math.random()), nombre: p.nombre, tarifa: p.tarifa, email: '', tel: '', cumple: '', notas: '', notaMensaje: '', creado: today() };
     DB.pacientes.push(np);
     promises.push(savePaciente(np));
     importados++;
@@ -536,16 +548,37 @@ function renderPacientes() {
       const deuda = ses.filter(s => s.estado !== 'pagada').reduce((a,s) => a + s.tarifa, 0);
       const cumpleStr = p.cumple ? '<br><span style="font-size:11px;color:var(--text3)">🎂 ' + p.cumple.substring(5).replace('-','/') + '</span>' : '';
       return `<tr>
-        <td><strong style="font-weight:500">${p.nombre}</strong>${p.notas ? '<br><span style="font-size:11px;color:var(--text3)">' + p.notas + '</span>' : ''}${p.email ? '<br><span style="font-size:11px;color:var(--text3)">' + p.email + '</span>' : ''}${cumpleStr}</td>
+        <td><strong style="font-weight:500">${p.nombre}</strong>${p.notas ? '<br><span style="font-size:11px;color:var(--text3)">' + p.notas + '</span>' : ''}${p.email ? '<br><span style="font-size:11px;color:var(--text3)">' + p.email + '</span>' : ''}${cumpleStr}<br><span style="font-size:11px;color:var(--text3)" id="nota-msg-view-${p.id}">💬 ${p.notaMensaje ? p.notaMensaje : '<em>Sin nota de mensaje</em>'}</span></td>
         <td id="tarifa-cell-${p.id}">${fmt(p.tarifa)}</td>
         <td>${ses.length}</td>
         <td>${deuda > 0 ? '<span class="badge deuda">' + fmt(deuda) + '</span>' : '<span class="badge pagada">Al día</span>'}</td>
         <td>
           <button class="btn small" onclick="editTarifa(${p.id})" title="Editar tarifa">✏️</button>
+          <button class="btn small" onclick="editNotaMensaje(${p.id})" title="Editar nota de mensaje">💬</button>
           <button class="btn small danger" onclick="deletePaciente(${p.id})" title="Eliminar">🗑</button>
         </td>
       </tr>`;
     }).join('') + '</tbody></table>';
+}
+
+function editNotaMensaje(id) {
+  const p = DB.pacientes.find(p => String(p.id) === String(id));
+  if (!p) return;
+  const span = document.getElementById('nota-msg-view-' + id);
+  if (!span) return;
+  span.innerHTML = `<input type="text" id="nota-msg-input-${id}" value="${(p.notaMensaje||'').replace(/"/g,'&quot;')}" placeholder="Frase breve sobre el proceso actual..." style="width:100%;max-width:320px;padding:4px;font-size:12px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);" onkeydown="if(event.key==='Enter')guardarNotaMensaje('${id}')" />
+    <button class="btn small primary" onclick="guardarNotaMensaje('${id}')" style="margin-left:4px;">✓</button>
+    <button class="btn small" onclick="renderPacientes()" style="margin-left:2px;">✕</button>`;
+  document.getElementById('nota-msg-input-' + id)?.focus();
+}
+
+async function guardarNotaMensaje(id) {
+  const p = DB.pacientes.find(p => String(p.id) === String(id));
+  const input = document.getElementById('nota-msg-input-' + id);
+  if (!p || !input) return;
+  p.notaMensaje = input.value.trim();
+  await savePaciente(p);
+  renderPacientes();
 }
 
 function editTarifa(id) {
@@ -595,25 +628,48 @@ function populateSelects() {
   const sp = document.getElementById('s-paciente');
   if (sp) sp.onchange = function() {
     const p = DB.pacientes.find(p => p.id == this.value);
+    window._sesionTarifaBase = p ? p.tarifa : 0;
     if (p) document.getElementById('s-tarifa').value = p.tarifa;
     else document.getElementById('s-tarifa').value = '';
+    actualizarTarifaPorDescuento();
   };
   document.getElementById('s-fecha').value = today();
+}
+
+function actualizarTarifaPorDescuento() {
+  const tipo = document.getElementById('s-tipo-tarifa')?.value || 'completa';
+  const base = window._sesionTarifaBase || 0;
+  const pctGroup = document.getElementById('s-descuento-pct-group');
+  const tarifaInput = document.getElementById('s-tarifa');
+  if (pctGroup) pctGroup.style.display = (tipo === 'otro') ? 'block' : 'none';
+  if (!base) return; // sin paciente seleccionado aún, no forzar el campo
+  if (tipo === 'completa') tarifaInput.value = base;
+  else if (tipo === 'media') tarifaInput.value = Math.round(base * 0.5);
+  else if (tipo === 'cortesia') tarifaInput.value = 0;
+  else if (tipo === 'otro') {
+    const pct = parseFloat(document.getElementById('s-descuento-pct')?.value) || 0;
+    tarifaInput.value = Math.round(base * (1 - pct / 100));
+  }
 }
 
 async function addSesion() {
   const pid = document.getElementById('s-paciente').value;
   const fecha = document.getElementById('s-fecha').value;
+  const tipoTarifa = document.getElementById('s-tipo-tarifa').value;
   const tarifa = parseInt(document.getElementById('s-tarifa').value) || 0;
   const estado = document.getElementById('s-estado').value;
   if (!pid) { alert('Selecciona un paciente.'); return; }
   if (!fecha) { alert('La fecha es obligatoria.'); return; }
-  if (!tarifa) { alert('Ingresa la tarifa de la sesión.'); return; }
-  const ns = { id: String(Date.now()), pacienteId: pid, fecha, tarifa, estado, notas: document.getElementById('s-notas').value.trim() };
+  if (!tarifa && tipoTarifa !== 'cortesia') { alert('Ingresa la tarifa de la sesión.'); return; }
+  const ns = { id: String(Date.now()), pacienteId: pid, fecha, tarifa, estado, tipoTarifa, notas: document.getElementById('s-notas').value.trim() };
+  if (tipoTarifa === 'otro') ns.descuentoPct = parseFloat(document.getElementById('s-descuento-pct')?.value) || 0;
   DB.sesiones.push(ns);
   await saveSesion(ns);
   document.getElementById('s-notas').value = '';
   document.getElementById('s-estado').value = 'pagada';
+  document.getElementById('s-tipo-tarifa').value = 'completa';
+  document.getElementById('s-descuento-pct').value = '';
+  actualizarTarifaPorDescuento();
   renderSesiones();
 }
 
@@ -630,10 +686,11 @@ function renderSesiones() {
   el.innerHTML = '<table style="margin-top:1rem;"><thead><tr><th>Fecha</th><th>Paciente</th><th>Tarifa</th><th>Estado</th><th>Notas</th><th></th></tr></thead><tbody>' +
     ses.map(s => {
       const p = DB.pacientes.find(p => p.id === s.pacienteId);
+      const etiquetaTipo = { media: 'Media sesión', cortesia: 'Cortesía', otro: 'Descuento' + (s.descuentoPct ? ' ' + s.descuentoPct + '%' : '') }[s.tipoTarifa] || '';
       return `<tr>
         <td>${s.fecha}</td>
         <td>${p ? p.nombre : '<em style="color:var(--text3)">Eliminado</em>'}</td>
-        <td>${fmt(s.tarifa)}</td>
+        <td>${fmt(s.tarifa)}${etiquetaTipo ? '<br><span class="tag">' + etiquetaTipo + '</span>' : ''}</td>
         <td><span class="badge ${s.estado}">${s.estado === 'pagada' ? 'Pagada' : s.estado === 'pendiente' ? 'Pendiente' : 'Deuda'}</span></td>
         <td style="font-size:12px;color:var(--text2);">${s.notas || '—'}</td>
         <td style="white-space:nowrap;">
@@ -898,7 +955,10 @@ async function generarMensajeWA() {
   const nombre = nombreRaw.charAt(0).toUpperCase() + nombreRaw.slice(1).toLowerCase();
 
   const fraseMes = FRASES_MES[mes];
-  const fraseTexto = '\n\n' + fraseMes.frase + '\n— ' + fraseMes.autor;
+  const notaPersonal = (p.notaMensaje || '').trim();
+  const fraseTexto = notaPersonal
+    ? '\n\n' + notaPersonal
+    : '\n\n' + fraseMes.frase + '\n— ' + fraseMes.autor;
   let msg = '';
   const fmtFecha = f => { const p = (f||'').split('-'); return parseInt(p[2]) + ' ' + MESES_FULL[parseInt(p[1])-1].substring(0,3); };
   const fechasPagadas = pagadas.map(s => fmtFecha(s.fecha)).join(', ');
@@ -1065,6 +1125,24 @@ function matchPaciente(titulo) {
   });
 }
 
+async function loadPacientesOnly() {
+  const { getDocs, collection } = window._fb;
+  const pSnap = await getDocs(collection(db, 'pacientes'));
+  DB.pacientes = pSnap.docs.map(d => ({ ...d.data(), id: d.id }));
+}
+
+async function loadSesionesDesde(fechaCorte) {
+  // Trae de Firebase solo las sesiones cuya fecha cae dentro del rango reciente
+  // relevante para la sincronización, en lugar de recargar el historial completo.
+  // Las sesiones más antiguas que ya están en memoria (cargadas al abrir la app)
+  // permanecen intactas.
+  const { getDocs, collection, query, where } = window._fb;
+  const q = query(collection(db, 'sesiones'), where('fecha', '>=', fechaCorte));
+  const snap = await getDocs(q);
+  const recientes = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+  DB.sesiones = DB.sesiones.filter(s => (s.fecha || '') < fechaCorte).concat(recientes);
+}
+
 async function getUltimaSincronizacion() {
   try {
     const { doc, getDoc } = window._fb;
@@ -1081,7 +1159,7 @@ async function guardarUltimaSincronizacion(fecha) {
   } catch(e) { console.error('Error guardando última sincronización:', e); }
 }
 
-async function getCalendarEvents() {
+async function getRangoSincronizacion() {
   const today = new Date();
   today.setHours(23,59,59,999); // hasta el final de hoy
 
@@ -1096,8 +1174,10 @@ async function getCalendarEvents() {
   } else {
     start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
   }
-  const end = today;
+  return { start, end: today };
+}
 
+async function getCalendarEvents(start, end) {
   const resp = await gapi.client.calendar.events.list({
     calendarId: 'primary',
     timeMin: start.toISOString(),
@@ -1115,7 +1195,7 @@ async function getCalendarEvents() {
   // Amarillo (5=Banana), Azul oscuro (9=Blueberry), Rojo (11=Tomato), Gris (8=Graphite)
   const excluir = ['5', '9', '11', '8'];
   const filtrados = all.filter(ev => !excluir.includes(ev.colorId));
-  return { eventos: filtrados, huboLimite, end };
+  return { eventos: filtrados, huboLimite };
 }
 
 async function marcarPagadaRapido(sesionId) {
@@ -1136,9 +1216,13 @@ async function autoSyncCalendar() {
   await waitForFirebase();
   el.innerHTML = '<div style="font-size:13px;color:var(--text2);">Sincronizando citas...</div>';
   try {
-    // Recargar sesiones desde Firebase antes de sincronizar para evitar falsos duplicados
-    await loadFromFirebase();
-    const { eventos: events, huboLimite, end } = await getCalendarEvents();
+    const { start, end } = await getRangoSincronizacion();
+    // Se refresca solo lo necesario para detectar duplicados con certeza: los pacientes
+    // completos (colección pequeña) y las sesiones del rango reciente relevante — no el
+    // historial completo, que es lo que estaba haciendo lenta la sincronización.
+    const fechaCorte = start.toISOString().split('T')[0];
+    await Promise.all([loadPacientesOnly(), loadSesionesDesde(fechaCorte)]);
+    const { eventos: events, huboLimite } = await getCalendarEvents(start, end);
     let importadas = 0;
     let omitidas = 0;
     let noDetectadas = 0;
