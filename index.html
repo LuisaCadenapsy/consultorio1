@@ -799,7 +799,7 @@ async function renderDashboard() {
 
   const mensajesEnv = await getMensajesEnviados(month, year);
   document.getElementById('dash-por-cobrar-mes').innerHTML = porCobrarMes.length
-    ? '<table><thead><tr><th>Paciente</th><th>Sesiones pendientes</th><th>Monto</th><th>Msg enviado</th></tr></thead><tbody>' +
+    ? '<table><thead><tr><th>Paciente</th><th>Sesiones pendientes</th><th>Monto</th><th>Msg enviado</th><th>Pagado</th></tr></thead><tbody>' +
       porCobrarMes.map(p => {
         const enviado = mensajesEnv[String(p.id)];
         return `<tr>
@@ -807,6 +807,7 @@ async function renderDashboard() {
           <td>${p.sesiones}</td>
           <td><span class="badge pendiente">${fmt(p.monto)}</span></td>
           <td><button class="btn small ${enviado ? 'primary' : ''}" onclick="toggleMensajeEnviado('${p.id}', ${month}, ${year})" title="${enviado ? 'Marcado como enviado' : 'Marcar como enviado'}">${enviado ? '✓ Enviado' : '— Pendiente'}</button></td>
+          <td><button class="btn small" onclick="marcarPagadoMes('${p.id}', ${month}, ${year})" title="Marcar las sesiones pendientes de este mes como pagadas">✓ Marcar pagado</button></td>
         </tr>`;
       }).join('') +
       '</tbody></table>'
@@ -866,6 +867,23 @@ async function markAllPaid(pid) {
   const toUpdate = DB.sesiones.filter(s => s.pacienteId == pid && s.estado !== 'pagada');
   toUpdate.forEach(s => s.estado = 'pagada');
   await Promise.all(toUpdate.map(s => saveSesion(s)));
+  renderCobros();
+}
+
+async function marcarPagadoMes(pid, mes, año) {
+  // A diferencia de markAllPaid (que salda toda la deuda histórica del paciente),
+  // esta función solo marca como pagadas las sesiones pendientes del mes que se
+  // está viendo en el dashboard — para no confundir un pago puntual de este mes
+  // con una deuda arrastrada de meses anteriores.
+  const toUpdate = DB.sesiones.filter(s => {
+    if (String(s.pacienteId) !== String(pid) || s.estado === 'pagada') return false;
+    const parts = (s.fecha || '').split('-');
+    return parseInt(parts[1]) - 1 === mes && parseInt(parts[0]) === año;
+  });
+  if (!toUpdate.length) return;
+  toUpdate.forEach(s => s.estado = 'pagada');
+  await Promise.all(toUpdate.map(s => saveSesion(s)));
+  renderDashboard();
   renderCobros();
 }
 
