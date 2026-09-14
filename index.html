@@ -457,6 +457,7 @@ function saveDB() { /* datos guardados en Firebase automáticamente */ }
 function loadDB() { return { pacientes: [], sesiones: [] }; }
 function fmt(n) { return new Intl.NumberFormat('es-CO', {style:'currency', currency:'COP', minimumFractionDigits:0}).format(n || 0); }
 function today() { return new Date().toISOString().split('T')[0]; }
+function ordenarPorNombre(arr) { return [...arr].sort((a,b) => (a.nombre||'').localeCompare(b.nombre||'', 'es', {sensitivity:'base'})); }
 
 function showSection(id, btn) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -540,7 +541,7 @@ async function confirmImportCSV() {
 function renderPacientes() {
   const el = document.getElementById('pacientes-list');
   const buscar = document.getElementById('buscar-paciente')?.value?.toLowerCase() || '';
-  const pacientesFiltrados = buscar ? DB.pacientes.filter(p => p.nombre.toLowerCase().includes(buscar)) : DB.pacientes;
+  const pacientesFiltrados = ordenarPorNombre(buscar ? DB.pacientes.filter(p => p.nombre.toLowerCase().includes(buscar)) : DB.pacientes);
   if (!pacientesFiltrados.length) { el.innerHTML = '<div class="empty">No se encontraron pacientes.</div>'; return; }
   el.innerHTML = '<table><thead><tr><th>Nombre</th><th>Tarifa</th><th>Sesiones</th><th>Deuda pendiente</th><th></th></tr></thead><tbody>' +
     pacientesFiltrados.map(p => {
@@ -622,7 +623,7 @@ function populateSelects() {
     const prev = sel.value;
     const isFilter = selId === 'filter-paciente';
     sel.innerHTML = (isFilter ? '<option value="">Todos los pacientes</option>' : '<option value="">Seleccionar...</option>') +
-      DB.pacientes.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+      ordenarPorNombre(DB.pacientes).map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
     if (prev) sel.value = prev;
   });
   const sp = document.getElementById('s-paciente');
@@ -830,7 +831,7 @@ function filtrarPacientesWA() {
   const wasel = document.getElementById('wa-paciente');
   if (!wasel) return;
   const fuente = DB.pacientes.length ? DB.pacientes : [];
-  const filtrados = buscar ? fuente.filter(p => p.nombre.toLowerCase().includes(buscar)) : fuente;
+  const filtrados = ordenarPorNombre(buscar ? fuente.filter(p => p.nombre.toLowerCase().includes(buscar)) : fuente);
   wasel.innerHTML = '<option value="">— Seleccionar paciente —</option>' +
     filtrados.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
   // Auto-select if only one result
@@ -842,7 +843,7 @@ function renderCobros() {
   const wasel = document.getElementById('wa-paciente');
   if (wasel) {
     wasel.innerHTML = '<option value="">— Seleccionar paciente —</option>' +
-      DB.pacientes.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+      ordenarPorNombre(DB.pacientes).map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
   }
   const buscarCobros = document.getElementById('buscar-cobros')?.value?.toLowerCase() || '';
   const el = document.getElementById('cobros-content');
