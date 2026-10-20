@@ -408,12 +408,12 @@ let gisInited = false;
 
 async function initFirebase() {
   const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
-  const { getFirestore, collection, getDocs, doc, setDoc, deleteDoc, getDoc, query, where } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  const { getFirestore, collection, getDocs, doc, setDoc, deleteDoc, getDoc, query, where, arrayUnion } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
   firebaseApp = initializeApp(firebaseConfig);
   db = getFirestore(firebaseApp);
   pacientesRef = collection(db, 'pacientes');
   sesionesRef = collection(db, 'sesiones');
-  window._fb = { collection, getDocs, doc, setDoc, deleteDoc, getDoc, query, where };
+  window._fb = { collection, getDocs, doc, setDoc, deleteDoc, getDoc, query, where, arrayUnion };
   await loadFromFirebase();
   renderPacientes();
   populateSelects();
@@ -1178,6 +1178,33 @@ async function guardarUltimaSincronizacion(fecha) {
   } catch(e) { console.error('Error guardando última sincronización:', e); }
 }
 
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function normTitulo(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+// Citas del calendario que ya no deben retener la fecha de corte:
+//  - titulos: títulos ignorados a propósito (almuerzo, reunión, etc.)
+//  - ids: eventos concretos ya resueltos a mano (asignados a un paciente)
+async function getIgnorados() {
+  try {
+    const { doc, getDoc } = window._fb;
+    const snap = await getDoc(doc(db, 'config', 'gcal_ignorados'));
+    const d = snap.exists() ? snap.data() : {};
+    return { titulos: d.titulos || [], ids: d.ids || [] };
+  } catch(e) { console.error('Error leyendo citas ignoradas:', e); return { titulos: [], ids: [] }; }
+}
+
+async function agregarIgnorados(campo, valores) {
+  // arrayUnion agrega sin reescribir lo existente, de modo que un fallo de lectura
+  // previo nunca pueda borrar la lista guardada.
+  const { doc, setDoc, arrayUnion } = window._fb;
+  await setDoc(doc(db, 'config', 'gcal_ignorados'), { [campo]: arrayUnion(...valores) }, { merge: true });
+}
+
 async function getRangoSincronizacion() {
   const today = new Date();
   today.setHours(23,59,59,999); // hasta el final de hoy
@@ -1242,9 +1269,11 @@ async function autoSyncCalendar() {
     const fechaCorte = start.toISOString().split('T')[0];
     await Promise.all([loadPacientesOnly(), loadSesionesDesde(fechaCorte)]);
     const { eventos: events, huboLimite } = await getCalendarEvents(start, end);
+    const ignorados = await getIgnorados();
     let importadas = 0;
     let omitidas = 0;
     let noDetectadas = 0;
+    let ignoradas = 0;
     const noDetectadasList = [];
     const importadasList = [];
     const promises = [];
@@ -1252,7 +1281,14 @@ async function autoSyncCalendar() {
       const fecha = ev.start.date || (ev.start.dateTime ? new Date(ev.start.dateTime).toLocaleDateString('en-CA') : null);
       const titulo = ev.summary || '';
       const p = matchPaciente(titulo);
-      if (!p) { noDetectadas++; noDetectadasList.push({fecha, titulo}); continue; }
+      if (!p) {
+        // Una cita sin paciente solo deja de retener la fecha de corte si fue resuelta
+        // a mano (id) o si su título se marcó como ignorado a propósito.
+        if (ignorados.ids.includes(ev.id) || ignorados.titulos.includes(normTitulo(titulo))) { ignoradas++; continue; }
+        noDetectadas++;
+        noDetectadasList.push({ id: ev.id, fecha, titulo });
+        continue;
+      }
       const fechaStr = String(fecha).trim();
       const pidStr = String(p.id).trim();
       const existe = DB.sesiones.find(s => String(s.pacienteId).trim() === pidStr && String(s.fecha).trim() === fechaStr);
@@ -1265,14 +1301,25 @@ async function autoSyncCalendar() {
     }
     await Promise.all(promises);
 
-    // Solo se guarda la marca de última sincronización si la consulta no chocó
-    // contra el límite de 500 eventos — si lo hizo, es mejor reintentar sin
-    // avanzar el punto de corte, para no dejar eventos sin revisar.
-    if (!huboLimite) {
-      await guardarUltimaSincronizacion(end);
+    // La marca de última sincronización avanza hasta hoy, salvo en dos casos:
+    //  1) La consulta chocó contra el límite de 500 eventos: no se avanza, para reintentar.
+    //  2) Quedan citas sin reconocer (pacientes aún sin registrar): la marca se detiene en
+    //     la fecha de la más antigua, de modo que la próxima sincronización las vuelva a
+    //     revisar y las tome en cuanto el paciente exista o se resuelvan a mano.
+    let nuevoCorte = end;
+    let corteRetenido = null;
+    const fechasPend = noDetectadasList.map(e => e.fecha).filter(Boolean).sort();
+    if (fechasPend.length) {
+      const f = new Date(fechasPend[0] + 'T00:00:00');
+      if (!isNaN(f) && f < nuevoCorte) { nuevoCorte = f; corteRetenido = fechasPend[0]; }
     }
-    
+    if (!huboLimite) {
+      await guardarUltimaSincronizacion(nuevoCorte);
+    }
+    window._noDetectadas = noDetectadasList;
+
     let html = '';
+    if (window._avisoSync) { html += `<div class="alert success">${escHtml(window._avisoSync)}</div>`; window._avisoSync = ''; }
     if (huboLimite) {
       html += `<div class="alert warning">La consulta alcanzó el límite de 500 eventos. Puede haber citas más recientes sin importar — se recomienda sincronizar de nuevo en un momento.</div>`;
     }
@@ -1294,22 +1341,43 @@ async function autoSyncCalendar() {
     if (omitidas > 0) html += `<div class="alert info">${omitidas} cita(s) ya existían — no se duplicaron.</div>`;
     
     if (noDetectadasList.length > 0) {
+      const opcionesPac = ordenarPorNombre(DB.pacientes).map(p => `<option value="${escHtml(p.id)}">${escHtml(p.nombre)}</option>`).join('');
       html += `<div class="card" style="margin-top:12px;">
         <div class="card-title">Citas no reconocidas (${noDetectadas})</div>
-        <p style="font-size:12px;color:var(--text2);margin-bottom:10px;">Estas citas no coinciden con ningún paciente de tu lista. Puedes importarlas manualmente.</p>
-        <table><thead><tr><th>Fecha</th><th>Título en Calendar</th><th></th></tr></thead><tbody>` +
-        noDetectadasList.map(ev => `<tr>
-          <td>${ev.fecha}</td>
-          <td>${ev.titulo}</td>
-          <td><select id="sel-${ev.fecha.replace(/-/g,'')}-${ev.titulo.replace(/[^a-zA-Z0-9]/g,'').substring(0,8)}" style="font-size:12px;padding:4px;">
-            <option value="">— asignar paciente —</option>
-            ${DB.pacientes.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('')}
-          </select>
-          <button class="btn small primary" onclick="importManualEvent('${ev.fecha}', 'sel-${ev.fecha.replace(/-/g,'')}-${ev.titulo.replace(/[^a-zA-Z0-9]/g,'').substring(0,8)}')">Importar</button></td>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:10px;">Estas citas no coinciden con ningún paciente registrado. Si corresponden a un paciente nuevo, usa <strong>+ Paciente nuevo</strong>: lo registras y sus citas se importan de una vez. Si no son de pacientes (almuerzo, reunión), usa <strong>Ignorar</strong>.</p>
+        ${corteRetenido ? `<div class="alert warning" style="font-size:12px;">Mientras estas citas sigan sin resolver, la próxima sincronización volverá a revisar desde el ${escHtml(corteRetenido)}. No se perderá ninguna.</div>` : ''}
+        <table><thead><tr><th>Fecha</th><th>Título en Calendar</th><th>Acciones</th></tr></thead><tbody>` +
+        noDetectadasList.map((ev, i) => `<tr>
+          <td>${escHtml(ev.fecha)}</td>
+          <td>${escHtml(ev.titulo)}</td>
+          <td>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+              <select id="nd-sel-${i}" style="font-size:12px;padding:4px;width:auto;max-width:170px;">
+                <option value="">— asignar paciente —</option>
+                ${opcionesPac}
+              </select>
+              <button class="btn small primary" onclick="importarNoDetectada(${i})">Importar</button>
+              <button class="btn small" onclick="mostrarRegistroRapido(${i})">+ Paciente nuevo</button>
+              <button class="btn small" onclick="ignorarNoDetectada(${i})">Ignorar</button>
+            </div>
+            <div id="nd-nuevo-${i}" style="display:none;margin-top:8px;padding:10px;background:var(--bg2);border-radius:var(--radius);">
+              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                <input id="nd-nombre-${i}" value="${escHtml(ev.titulo)}" placeholder="Nombre completo" style="font-size:12px;padding:4px;width:200px;" />
+                <input id="nd-tarifa-${i}" type="number" placeholder="Tarifa (COP)" style="font-size:12px;padding:4px;width:120px;" />
+                <button class="btn small primary" onclick="registrarPacienteDesdeCita(${i})">Registrar e importar</button>
+                <button class="btn small" onclick="document.getElementById('nd-nuevo-${i}').style.display='none'">✕</button>
+              </div>
+              <div style="font-size:11px;color:var(--text3);margin-top:6px;">Para que las próximas citas se reconozcan solas, el nombre debe aparecer completo en el título del calendario.</div>
+            </div>
+          </td>
         </tr>`).join('') +
-        '</tbody></table></div>';
+        '</tbody></table>' +
+        (ignorados.titulos.length ? `<div style="font-size:11px;color:var(--text3);margin-top:10px;">${ignorados.titulos.length} título(s) ignorados: ${ignorados.titulos.map(escHtml).join(', ')} · <a href="#" onclick="restablecerIgnorados();return false;">Restablecer</a></div>` : '') +
+        '</div>';
+    } else if (ignorados.titulos.length) {
+      html += `<div style="font-size:11px;color:var(--text3);margin-top:8px;">${ignorados.titulos.length} título(s) ignorados: ${ignorados.titulos.map(escHtml).join(', ')} · <a href="#" onclick="restablecerIgnorados();return false;">Restablecer</a></div>`;
     }
-    
+
     if (importadas === 0 && noDetectadasList.length === 0) {
       html += '<div class="alert info">Todo al día — no hay citas nuevas para importar.</div>';
     }
@@ -1319,15 +1387,88 @@ async function autoSyncCalendar() {
   } catch(e) { el.innerHTML = '<div class="alert warning">Error al sincronizar: ' + (e.message || e) + '</div>'; }
 }
 
-async function importManualEvent(fecha, selId) {
-  const pid = document.getElementById(selId)?.value;
-  const p = DB.pacientes.find(p => p.id == pid);
+/* ---- CITAS NO RECONOCIDAS: asignar, registrar paciente nuevo, ignorar ---- */
+async function importarNoDetectada(i) {
+  const item = (window._noDetectadas || [])[i];
+  if (!item) return;
+  const pid = document.getElementById('nd-sel-' + i)?.value;
+  const p = DB.pacientes.find(p => String(p.id) === String(pid));
   if (!p) { alert('Selecciona un paciente.'); return; }
-  const existe = DB.sesiones.find(s => s.pacienteId == p.id && s.fecha === fecha);
-  if (existe) { alert('Ya existe una sesión de ' + p.nombre + ' en esa fecha.'); return; }
-  const ns = { id: String(Date.now()), pacienteId: p.id, fecha, tarifa: p.tarifa, estado: 'pendiente', notas: 'Importada manualmente' };
-  DB.sesiones.push(ns);
-  await saveSesion(ns);
+  const existe = DB.sesiones.find(s => String(s.pacienteId) === String(p.id) && String(s.fecha) === String(item.fecha));
+  if (!existe) {
+    const ns = { id: String(Date.now() + Math.random()), pacienteId: String(p.id), fecha: String(item.fecha), tarifa: p.tarifa, estado: 'pendiente', notas: 'Importada manualmente' };
+    DB.sesiones.push(ns);
+    await saveSesion(ns);
+  }
+  // Se registra el evento como resuelto para que ya no retenga la fecha de corte.
+  await agregarIgnorados('ids', [item.id]);
+  window._avisoSync = existe
+    ? 'Ya existía una sesión de ' + p.nombre + ' en esa fecha; la cita quedó marcada como resuelta.'
+    : '✓ Sesión de ' + p.nombre + ' importada (' + item.fecha + ').';
+  await autoSyncCalendar();
+}
+
+function mostrarRegistroRapido(i) {
+  const box = document.getElementById('nd-nuevo-' + i);
+  if (box) { box.style.display = 'block'; document.getElementById('nd-tarifa-' + i)?.focus(); }
+}
+
+async function registrarPacienteDesdeCita(i) {
+  const item = (window._noDetectadas || [])[i];
+  if (!item) return;
+  const nombre = (document.getElementById('nd-nombre-' + i)?.value || '').trim();
+  const tarifa = parseInt(document.getElementById('nd-tarifa-' + i)?.value) || 0;
+  if (!nombre) { alert('El nombre es obligatorio.'); return; }
+  if (!tarifa) { alert('La tarifa es obligatoria.'); return; }
+  if (DB.pacientes.find(p => normTitulo(p.nombre) === normTitulo(nombre))) {
+    alert('Ya existe un paciente con ese nombre. Usa "asignar paciente" para vincular la cita.'); return;
+  }
+  const np = { id: String(Date.now()), nombre, tarifa, email: '', tel: '', cumple: '', notas: '', notaMensaje: '', creado: today() };
+  DB.pacientes.push(np);
+  await savePaciente(np);
+  populateSelects(); renderPacientes();
+
+  // Caso 1: el nombre registrado coincide con el título del calendario. La propia
+  // sincronización importa las citas y muestra la tabla para marcar pagos.
+  if (matchPaciente(item.titulo)?.id === np.id) {
+    window._avisoSync = '✓ Paciente ' + nombre + ' registrado. Sus citas se importaron a continuación.';
+    await autoSyncCalendar();
+    return;
+  }
+
+  // Caso 2: el nombre difiere del título. Se importan directamente todas las citas
+  // pendientes con ese mismo título y se marcan como resueltas.
+  const tN = normTitulo(item.titulo);
+  const mismos = (window._noDetectadas || []).filter(e => normTitulo(e.titulo) === tN);
+  const resueltos = [];
+  let creadas = 0;
+  for (const e of mismos) {
+    const existe = DB.sesiones.find(s => String(s.pacienteId) === String(np.id) && String(s.fecha) === String(e.fecha));
+    if (!existe) {
+      const ns = { id: String(Date.now() + Math.random()), pacienteId: String(np.id), fecha: String(e.fecha), tarifa: np.tarifa, estado: 'pendiente', notas: 'Sincronizada de Google Calendar' };
+      DB.sesiones.push(ns);
+      await saveSesion(ns);
+      creadas++;
+    }
+    resueltos.push(e.id);
+  }
+  await agregarIgnorados('ids', resueltos);
+  window._avisoSync = '✓ Paciente ' + nombre + ' registrado y ' + creadas + ' sesión(es) importada(s). Revisa su estado de pago en Sesiones.';
+  await autoSyncCalendar();
+}
+
+async function ignorarNoDetectada(i) {
+  const item = (window._noDetectadas || [])[i];
+  if (!item) return;
+  if (!confirm('¿Ignorar todas las citas del calendario con el título "' + item.titulo + '"? Dejarán de aparecer aquí.')) return;
+  await agregarIgnorados('titulos', [normTitulo(item.titulo)]);
+  await autoSyncCalendar();
+}
+
+async function restablecerIgnorados() {
+  if (!confirm('¿Restablecer la lista de títulos ignorados? Volverán a aparecer como citas no reconocidas.')) return;
+  const { doc, setDoc } = window._fb;
+  await setDoc(doc(db, 'config', 'gcal_ignorados'), { titulos: [] }, { merge: true });
   await autoSyncCalendar();
 }
 
@@ -1410,3 +1551,4 @@ initFirebase().catch(err => {
 <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
+
