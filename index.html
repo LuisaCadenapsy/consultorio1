@@ -255,8 +255,10 @@
             <option value="6">Julio</option><option value="7">Agosto</option><option value="8">Septiembre</option>
             <option value="9">Octubre</option><option value="10">Noviembre</option><option value="11">Diciembre</option>
           </select>
+          <button class="btn small primary" id="btn-exportar-historial" onclick="exportarHistorial()" title="Descarga en Excel lo que muestra la tabla con los filtros actuales">⬇ Descargar Excel</button>
         </div>
       </div>
+      <div id="historial-aviso" style="font-size:12px;color:var(--text3);margin-top:6px;"></div>
       <div id="sesiones-list"></div>
     </div>
   </div>
@@ -674,8 +676,9 @@ async function addSesion() {
   renderSesiones();
 }
 
-function renderSesiones() {
-  const el = document.getElementById('sesiones-list');
+// Sesiones que muestra el historial según los filtros activos (más recientes primero).
+// La tabla en pantalla y la descarga en Excel comparten esta misma función.
+function getSesionesFiltradas() {
   const filtP = document.getElementById('filter-paciente')?.value;
   const filtE = document.getElementById('filter-estado')?.value;
   const filtM = document.getElementById('filter-mes')?.value;
@@ -683,6 +686,12 @@ function renderSesiones() {
   if (filtP) ses = ses.filter(s => s.pacienteId == filtP);
   if (filtE) ses = ses.filter(s => s.estado === filtE);
   if (filtM !== '' && filtM !== null && filtM !== undefined) ses = ses.filter(s => { const p = s.fecha.split('-'); return parseInt(p[1])-1 == filtM; });
+  return ses;
+}
+
+function renderSesiones() {
+  const el = document.getElementById('sesiones-list');
+  const ses = getSesionesFiltradas();
   if (!ses.length) { el.innerHTML = '<div class="empty" style="margin-top:1rem;">No hay sesiones con esos filtros.</div>'; return; }
   el.innerHTML = '<table style="margin-top:1rem;"><thead><tr><th>Fecha</th><th>Paciente</th><th>Tarifa</th><th>Estado</th><th>Notas</th><th></th></tr></thead><tbody>' +
     ses.map(s => {
@@ -700,6 +709,127 @@ function renderSesiones() {
         </td>
       </tr>`;
     }).join('') + '</tbody></table>';
+}
+
+/* ---- DESCARGA DEL HISTORIAL (Excel) ---- */
+const NOTAS_AUTOMATICAS = ['Sincronizada de Google Calendar', 'Importada manualmente', 'Importada de Google Calendar'];
+
+function hoyLocal() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+function fechaDMA(iso) { const [y, m, d] = String(iso).split('-'); return d + '/' + m + '/' + y; }
+function serialExcel(iso) { const [y, m, d] = String(iso).split('-').map(Number); return Date.UTC(y, m - 1, d) / 86400000 + 25569; }
+function etiquetaTarifa(s) {
+  return { media: 'Media sesión', cortesia: 'Cortesía', otro: 'Descuento' + (s.descuentoPct ? ' ' + s.descuentoPct + '%' : '') }[s.tipoTarifa] || 'Completa';
+}
+function etiquetaEstado(e) { return e === 'pagada' ? 'Pagada' : e === 'pendiente' ? 'Pendiente' : 'Deuda'; }
+
+function cargarSheetJS() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error('Librería de Excel no disponible'));
+    s.onerror = () => reject(new Error('No se pudo cargar la librería de Excel'));
+    document.head.appendChild(s);
+  });
+}
+
+function descargarCSVHistorial(encabezado, filas, nombreArchivo) {
+  // Respaldo si la librería de Excel no carga. Separador ";" porque Excel en configuración
+  // regional colombiana lo espera, y BOM para conservar tildes.
+  const esc = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const csv = [encabezado].concat(filas).map(f => f.map(esc).join(';')).join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = nombreArchivo.replace(/\.xlsx$/, '.csv'); a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function exportarHistorial() {
+  const aviso = document.getElementById('historial-aviso');
+  const btn = document.getElementById('btn-exportar-historial');
+  // Orden cronológico (de la más antigua a la más reciente): es el orden natural de un historial.
+  const ses = getSesionesFiltradas().slice().sort((a, b) => a.fecha.localeCompare(b.fecha));
+  if (!ses.length) { aviso.textContent = 'No hay sesiones con esos filtros para descargar.'; return; }
+
+  const pid = document.getElementById('filter-paciente').value;
+  const pac = pid ? DB.pacientes.find(p => String(p.id) === String(pid)) : null;
+  const selMes = document.getElementById('filter-mes'), selEst = document.getElementById('filter-estado');
+  const filtros = [];
+  if (selMes.value !== '') filtros.push(selMes.options[selMes.selectedIndex].text);
+  if (selEst.value) filtros.push(selEst.options[selEst.selectedIndex].text);
+  const titulo = pac ? pac.nombre : 'Todos los pacientes';
+  const nombreArchivo = 'historial_' + normTitulo(titulo).replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') + '_' + hoyLocal() + '.xlsx';
+
+  // Con un paciente elegido, su nombre va en el encabezado y se omite la columna Paciente.
+  const conPac = !pac;
+  const encabezado = ['N°', 'Fecha'].concat(conPac ? ['Paciente'] : [], ['Tipo de tarifa', 'Valor (COP)', 'Estado', 'Notas']);
+  const datos = ses.map((s, i) => {
+    const p = DB.pacientes.find(x => String(x.id) === String(s.pacienteId));
+    const nota = NOTAS_AUTOMATICAS.includes((s.notas || '').trim()) ? '' : (s.notas || '');
+    return { n: i + 1, fecha: s.fecha, paciente: p ? p.nombre : '(paciente eliminado)', tipo: etiquetaTarifa(s), valor: Number(s.tarifa) || 0, estado: etiquetaEstado(s.estado), nota };
+  });
+  const filaCSV = d => [d.n, fechaDMA(d.fecha)].concat(conPac ? [d.paciente] : [], [d.tipo, d.valor, d.estado, d.nota]);
+
+  btn.disabled = true; aviso.textContent = 'Preparando archivo...';
+  try {
+    const XLSX = await cargarSheetJS();
+    const n = datos.length;
+    const cTipo = conPac ? 'D' : 'C', cValor = conPac ? 'E' : 'D', cEstado = conPac ? 'F' : 'E';
+    const primera = 7, ultima = 6 + n;              // filas de datos, en numeración de Excel
+    const rTotal = ultima + 2;                       // deja una fila en blanco antes de los totales
+    const rangoValor = `${cValor}${primera}:${cValor}${ultima}`;
+    const rangoEstado = `${cEstado}${primera}:${cEstado}${ultima}`;
+
+    const aoa = [
+      ['Historial de sesiones'],
+      ['Paciente', titulo],
+      ['Filtros', filtros.length ? filtros.join(' · ') : 'Todas las sesiones'],
+      ['Generado', fechaDMA(hoyLocal())],
+      [],
+      encabezado
+    ].concat(datos.map(filaCSV));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // Fechas como fechas reales y valores con formato de pesos, para poder ordenar y sumar en Excel.
+    const colFecha = 'B';
+    datos.forEach((d, i) => {
+      const r = primera + i;
+      ws[colFecha + r] = { t: 'n', v: serialExcel(d.fecha), z: 'dd/mm/yyyy' };
+      ws[cValor + r] = { t: 'n', v: d.valor, z: '"$"#,##0' };
+    });
+
+    const pagado = datos.filter(d => d.estado === 'Pagada').reduce((a, d) => a + d.valor, 0);
+    const total = datos.reduce((a, d) => a + d.valor, 0);
+    const pesos = '"$"#,##0';
+    const filasTotales = [
+      ['Total de sesiones', { t: 'n', f: `COUNT(${rangoValor})`, v: n }],
+      ['Total facturado', { t: 'n', f: `SUM(${rangoValor})`, v: total, z: pesos }],
+      ['Pagado', { t: 'n', f: `SUMIF(${rangoEstado},"Pagada",${rangoValor})`, v: pagado, z: pesos }],
+      ['Pendiente de pago', { t: 'n', f: `${cValor}${rTotal + 1}-${cValor}${rTotal + 2}`, v: total - pagado, z: pesos }]
+    ];
+    filasTotales.forEach(([etiqueta, celda], i) => {
+      ws[cTipo + (rTotal + i)] = { t: 's', v: etiqueta };
+      ws[cValor + (rTotal + i)] = celda;
+    });
+
+    ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rTotal + filasTotales.length - 2, c: encabezado.length - 1 } });
+    ws['!cols'] = [{ wch: 6 }, { wch: 13 }].concat(conPac ? [{ wch: 28 }] : [], [{ wch: 18 }, { wch: 16 }, { wch: 12 }, { wch: 42 }]);
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Historial');
+    XLSX.writeFile(wb, nombreArchivo);
+    aviso.textContent = '✓ Descargado: ' + n + ' sesión(es) de ' + titulo + '.';
+  } catch (e) {
+    console.error('Exportar historial:', e);
+    descargarCSVHistorial(encabezado, datos.map(filaCSV), nombreArchivo);
+    aviso.textContent = 'No se pudo generar el Excel; se descargó una copia en CSV (ábrela con Excel).';
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { if (aviso) aviso.textContent = ''; }, 8000);
+  }
 }
 
 async function toggleEstado(id) {
